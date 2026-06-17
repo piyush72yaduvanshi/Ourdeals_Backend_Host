@@ -32,7 +32,7 @@ const uploadFile = async (file, folder, userId) => {
       const command = new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: key,
-        Body: fs.readFileSync(file.path),
+        Body: file.buffer || fs.readFileSync(file.path),
         ContentType: file.mimetype,
       });
 

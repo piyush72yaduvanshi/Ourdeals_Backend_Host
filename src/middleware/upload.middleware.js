@@ -48,7 +48,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage,
   limits: {
-    fileSize: Number(process.env.UPLOAD_MAX_FILE_SIZE) || 5 * 1024 * 1024, // 5MB
+    fileSize: Number(process.env.UPLOAD_MAX_FILE_SIZE) || 50 * 1024 * 1024, // 50MB default (increased for PDF reports)
   },
   fileFilter,
 });

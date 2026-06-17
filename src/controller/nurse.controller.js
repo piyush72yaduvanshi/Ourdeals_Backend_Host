@@ -55,9 +55,12 @@ const getBookings = async (req, res) => {
     const nurseId = req.user.userId;
     const { status, page, limit } = req.query;
 
+    console.log(`Nurse ${nurseId} requesting bookings with status: ${status}`); // Debug log
+
     const filters = {
       status,
-      serviceType: ServiceType.NURSE,
+      // Remove serviceType filter to get all bookings for this nurse
+      // serviceType: ServiceType.NURSE,
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 20,
     };
@@ -68,11 +71,56 @@ const getBookings = async (req, res) => {
       filters
     );
 
+    console.log(`Found ${bookings.length} bookings for nurse ${nurseId}`); // Debug log
+    console.log(`Bookings:`, bookings.map(b => ({ id: b._id, status: b.status, serviceType: b.serviceType, provider: b.provider }))); // Debug log
+
     res.json(
       paginatedResponse('Bookings fetched', bookings, filters.page, filters.limit, total)
     );
   } catch (error) {
+    console.error('Get bookings error:', error); // Debug log
     res.status(500).json(errorResponse(error.message || 'Failed to fetch bookings'));
+  }
+};
+
+const getBookingDetails = async (req, res) => {
+  try {
+    const nurseId = req.user.userId;
+    const { id } = req.params;
+
+    console.log(`Nurse ${nurseId} requesting booking ${id}`); // Debug log
+
+    const booking = await bookingService.getBooking(id);
+
+    if (!booking) {
+      console.log(`Booking ${id} not found`); // Debug log
+      return res.status(404).json(errorResponse('Booking not found'));
+    }
+
+    // Debug log the booking provider info
+    console.log(`Booking provider:`, booking.provider);
+    console.log(`Nurse ID:`, nurseId);
+
+    // Verify this booking belongs to the nurse
+    // booking.provider is populated, so we need to check the _id field
+    // Convert both to strings for comparison
+    const providerId = booking.provider?._id ? booking.provider._id.toString() : booking.provider?.toString();
+    const nurseIdStr = nurseId.toString();
+    
+    console.log(`Provider ID extracted:`, providerId); // Debug log
+    console.log(`Nurse ID string:`, nurseIdStr); // Debug log
+    
+    if (providerId !== nurseIdStr) {
+      console.log(`Access denied: ${providerId} !== ${nurseIdStr}`); // Debug log
+      return res.status(403).json(errorResponse('Access denied'));
+    }
+
+    console.log(`Access granted for booking ${id}`); // Debug log
+    res.json(successResponse('Booking details fetched', booking));
+  } catch (error) {
+    console.error('Get booking details error:', error); // Debug log
+    res.status(error.statusCode || 500)
+      .json(errorResponse(error.message || 'Failed to fetch booking details'));
   }
 };
 
@@ -88,6 +136,21 @@ const acceptBooking = async (req, res) => {
   } catch (error) {
     res.status(error.statusCode || 500)
       .json(errorResponse(error.message || 'Failed to accept booking'));
+  }
+};
+
+const rejectBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const nurseId = req.user.userId;
+    const { reason } = req.body;
+
+    const booking = await bookingService.cancelBooking(id, nurseId, reason || 'Rejected by nurse');
+
+    res.json(successResponse('Booking rejected', booking));
+  } catch (error) {
+    res.status(error.statusCode || 500)
+      .json(errorResponse(error.message || 'Failed to reject booking'));
   }
 };
 
@@ -144,10 +207,15 @@ const getDashboard = async (req, res) => {
   try {
     const nurseId = req.user.userId;
 
+    console.log(`Getting dashboard for nurse ${nurseId}`); // Debug log
+
     const [activeBookings, nurse] = await Promise.all([
       bookingService.getActiveBookings(nurseId, 'provider'),
       Nurse.findById(nurseId),
     ]);
+
+    console.log(`Found ${activeBookings.length} active bookings for nurse ${nurseId}`); // Debug log
+    console.log(`Active bookings:`, activeBookings.map(b => ({ id: b._id, status: b.status, serviceType: b.serviceType }))); // Debug log
 
     const dashboardData = {
       activeVisits: activeBookings.length,
@@ -156,8 +224,11 @@ const getDashboard = async (req, res) => {
       servicesOffered: nurse?.servicesOffered || [],
     };
 
+    console.log(`Dashboard data:`, dashboardData); // Debug log
+
     res.json(successResponse('Dashboard data fetched', dashboardData));
   } catch (error) {
+    console.error('Get dashboard error:', error); // Debug log
     res.status(500).json(errorResponse(error.message || 'Failed to fetch dashboard'));
   }
 };
@@ -281,7 +352,9 @@ export {
   updateServices,
   setAvailability,
   getBookings,
+  getBookingDetails,
   acceptBooking,
+  rejectBooking,
   startVisit,
   completeVisit,
   getDashboard,

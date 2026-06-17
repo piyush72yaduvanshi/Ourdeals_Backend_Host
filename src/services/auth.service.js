@@ -5,6 +5,7 @@ import { Ambulance } from "../models/Ambulance.model.js";
 import { Pharmacist } from "../models/Pharmacist.model.js";
 import { BloodBank } from "../models/BloodBank.model.js";
 import { Pathology } from "../models/Pathology.model.js";
+import { LabTest } from "../models/LabTest.model.js";
 import { tokenService } from "./token.service.js";
 import { logger } from "../utils/logger.util.js";
 import { UserRole, UserStatus } from "../types/index.js";
@@ -62,6 +63,9 @@ const register = async (userData) => {
         break;
       case UserRole.PATHOLOGY:
         user = await Pathology.create(baseData);
+        break;
+      case UserRole.LABTEST:
+        user = await LabTest.create(baseData);
         break;
       default:
         user = await User.create(baseData);

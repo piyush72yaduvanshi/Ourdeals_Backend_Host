@@ -24,6 +24,10 @@ import {
   getAmbulanceDetails,
   getNurseAvailability,
   getMedicineById,
+  getDoctorById,
+  createPrescriptionOrder,
+  getPrescriptionOffers,
+  approvePrescriptionOffer,
 } from "../controller/patient.controller.js";
 
 import { authenticate } from "../middleware/auth.middleware.js";
@@ -33,6 +37,7 @@ import {
   validateQuery,
   validateParams,
 } from "../middleware/validation.middleware.js";
+import { uploadDocuments } from "../middleware/s3Upload.middleware.js";
 
 import {
   createBookingSchema,
@@ -59,6 +64,14 @@ router.get(
 router.post("/bookings", validate(createBookingSchema), createBooking);
 
 router.get("/bookings", validateQuery(bookingQuerySchema), getBookings);
+
+router.post(
+  "/prescription-order",
+  uploadDocuments.multiple("prescriptionImages", 5),
+  createPrescriptionOrder
+);
+router.get("/orders/:id/offers", validateParams(idParamSchema), getPrescriptionOffers);
+router.post("/orders/:id/approve-offer", validateParams(idParamSchema), approvePrescriptionOffer);
 
 router.get("/bookings/active", getActiveBookings);
 
@@ -104,5 +117,6 @@ router.get("/nurses/:id", validateParams(idParamSchema), getNurseDetails);
 router.get("/nurses/:id/availability", validateParams(idParamSchema), getNurseAvailability);
 router.get("/ambulances/:id", validateParams(idParamSchema), getAmbulanceDetails);
 router.get("/medicines/:id", validateParams(idParamSchema), getMedicineById);
+router.get("/doctors/:id", validateParams(idParamSchema), getDoctorById);
 
 export default router;

@@ -2,15 +2,7 @@ node_modules
 .env
 .env.local
 logs
-.env.docker
-.env.docker.local
-.dockerignore
-.env.example
-.env.production
-docker-compose.yml
-Dockerfile
-docker-compose.prod.yml
-postman
+
 
 
 # Docker

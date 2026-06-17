@@ -1,4 +1,4 @@
-﻿import mongoose from "mongoose";
+import mongoose from "mongoose";
 
 const SERVICE_TYPES = [
   "doctor",
@@ -30,6 +30,16 @@ const BookingSchema = new mongoose.Schema(
       ref: "User",
       required: true,
       index: true,
+    },
+
+    patientAge: {
+      type: Number,
+      min: 0,
+    },
+
+    patientGender: {
+      type: String,
+      enum: ["Male", "Female", "Other"],
     },
 
     provider: {
@@ -68,6 +78,23 @@ const BookingSchema = new mongoose.Schema(
     },
 
     endTime: {
+      type: Date,
+    },
+
+    // Ambulance-specific status timestamps
+    acceptedAt: {
+      type: Date,
+    },
+
+    onTheWayAt: {
+      type: Date,
+    },
+
+    atPickupAt: {
+      type: Date,
+    },
+
+    atDropAt: {
       type: Date,
     },
 
@@ -178,6 +205,15 @@ const BookingSchema = new mongoose.Schema(
       type: Date,
     },
 
+    videoCallCompleted: {
+      type: Boolean,
+      default: false,
+    },
+
+    videoCallEndedAt: {
+      type: Date,
+    },
+
     // Zoom specific fields
     zoomMeetingId: {
       type: String,
@@ -197,6 +233,26 @@ const BookingSchema = new mongoose.Schema(
     zoomHostStartUrl: {
       type: String,
       trim: true,
+    },
+
+    // Real-time call tracking fields
+    doctor_on_call: {
+      type: Boolean,
+      default: false,
+    },
+
+    patient_on_call: {
+      type: Boolean,
+      default: false,
+    },
+
+    consultation_ended: {
+      type: Boolean,
+      default: false,
+    },
+
+    consultation_ended_at: {
+      type: Date,
     },
 
     reminderSent: {
@@ -329,6 +385,44 @@ const BookingSchema = new mongoose.Schema(
     unitsRequired: {
       type: Number,
       min: 1,
+    },
+
+    // Medicine delivery tracking (for pharmacist bookings)
+    deliveryStatus: {
+      type: String,
+      enum: ['ordered', 'packed', 'shipped', 'out_for_delivery', 'delivered'],
+      default: function() {
+        return this.serviceType === 'pharmacist' ? 'ordered' : undefined;
+      },
+    },
+
+    deliveryTrackingId: {
+      type: String,
+      trim: true,
+    },
+
+    deliveryPartner: {
+      type: String,
+      trim: true,
+    },
+
+    estimatedDeliveryTime: {
+      type: Date,
+    },
+
+    actualDeliveryTime: {
+      type: Date,
+    },
+
+    deliveryAddress: {
+      type: String,
+      trim: true,
+    },
+
+    deliveryNotes: {
+      type: String,
+      trim: true,
+      maxlength: 500,
     },
   },
   { timestamps: true },

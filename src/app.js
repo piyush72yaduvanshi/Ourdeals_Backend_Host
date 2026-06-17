@@ -33,25 +33,25 @@ const app = express();
 // ============================================
 
 // 1. Helmet - Security Headers
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", 'data:', 'https:'],
-      connectSrc: ["'self'", 'https://api.razorpay.com'],
-    },
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true,
-  },
-  frameguard: { action: 'deny' },
-  noSniff: true,
-  xssFilter: true,
-}));
+// app.use(helmet({
+//   contentSecurityPolicy: {
+//     directives: {
+//       defaultSrc: ["'self'"],
+//       styleSrc: ["'self'", "'unsafe-inline'"],
+//       scriptSrc: ["'self'"],
+//       imgSrc: ["'self'", 'data:', 'https:'],
+//       connectSrc: ["'self'", 'https://api.razorpay.com'],
+//     },
+//   },
+//   hsts: {
+//     maxAge: 31536000,
+//     includeSubDomains: true,
+//     preload: true,
+//   },
+//   frameguard: { action: 'deny' },
+//   noSniff: true,
+//   xssFilter: true,
+// }));
 
 // 2. CORS - Whitelist Origins (CRITICAL FIX)
 // const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
@@ -222,6 +222,7 @@ app.use("/api/v1/pharmacist", pharmacistRouter);
 app.use("/api/v1/bloodbank", bloodbankRouter);
 app.use("/api/v1/pathology", pathologyRouter);
 app.use("/api/v1/realtime", realTimeBookingRouter);
+app.use("/api/v1/realTimeBooking", realTimeBookingRouter); // Alias for frontend backward compatibility
 app.use("/api/v1/documents", documentRouter);
 app.use("/api/v1/payments", paymentRouter);
 app.use("/api/v1/bookings", bookingRouter);

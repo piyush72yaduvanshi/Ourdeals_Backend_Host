@@ -10,6 +10,13 @@ const AmbulanceSchema = new mongoose.Schema(
       trim: true,
     },
 
+    driverMobileNumber: {
+      type: String,
+      required: true,
+      trim: true,
+      match: [/^\+?[1-9]\d{9,14}$/, "Invalid phone number"],
+    },
+
     driverLicense: {
       type: String,
       required: true,

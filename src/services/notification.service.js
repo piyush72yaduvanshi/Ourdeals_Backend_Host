@@ -269,6 +269,72 @@ const sendMedicineOrderToAllPharmacists = async (bookingId, orderDetails) => {
   }
 };
 
+const sendNurseRequestToAllNurses = async (bookingId, requestDetails) => {
+  try {
+    // Get all approved nurses
+    const nurses = await User.find({
+      role: 'nurse',
+      status: 'approved',
+    }).select('_id');
+
+    // Send notification to all nurses
+    const notificationPromises = nurses.map(nurse =>
+      send({
+        recipient: nurse._id,
+        type: 'nurse_request',
+        title: 'New Nursing Service Request',
+        message: `New nursing service request: ${requestDetails.serviceType} for ${requestDetails.duration} day(s) - ₹${requestDetails.totalAmount}`,
+        data: { 
+          bookingId,
+          requestDetails,
+        },
+        sendPush: true,
+      })
+    );
+
+    await Promise.all(notificationPromises);
+    logger.info(`Nurse request notifications sent to ${nurses.length} nurses for booking ${bookingId}`);
+  } catch (error) {
+    logger.error('Failed to send nurse request notifications', {
+      error: error.message,
+      bookingId,
+    });
+  }
+};
+
+const sendLabTestRequestToAllLabs = async (bookingId, testDetails) => {
+  try {
+    // Get all approved pathology labs
+    const labs = await User.find({
+      role: 'pathology',
+      status: 'approved',
+    }).select('_id');
+
+    // Send notification to all labs
+    const notificationPromises = labs.map(lab =>
+      send({
+        recipient: lab._id,
+        type: 'lab_test_request',
+        title: 'New Lab Test Request',
+        message: `New lab test request: ${testDetails.testCount} test(s) - Total: ₹${testDetails.totalAmount}`,
+        data: { 
+          bookingId,
+          testDetails,
+        },
+        sendPush: true,
+      })
+    );
+
+    await Promise.all(notificationPromises);
+    logger.info(`Lab test request notifications sent to ${labs.length} labs for booking ${bookingId}`);
+  } catch (error) {
+    logger.error('Failed to send lab test request notifications', {
+      error: error.message,
+      bookingId,
+    });
+  }
+};
+
 export const notificationService = {
   send,
   sendPush,
@@ -285,6 +351,8 @@ export const notificationService = {
   sendMeetingReminder,
   sendPrescriptionAvailable,
   sendMedicineOrderToAllPharmacists,
+  sendNurseRequestToAllNurses,
+  sendLabTestRequestToAllLabs,
   markAsRead,
   markAllAsRead,
   getUserNotifications,

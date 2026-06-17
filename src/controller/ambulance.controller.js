@@ -1,7 +1,6 @@
-﻿import { bookingService } from '../services/booking.service.js';
+﻿import { realTimeBookingService } from '../services/realTimeBooking.service.js';
 import { locationService } from '../services/location.service.js';
 import { successResponse, errorResponse, paginatedResponse } from '../utils/response.util.js';
-import { ServiceType, BookingStatus } from '../types/index.js';
 
 const updateProfile = async (req, res) => {
   try {
@@ -70,38 +69,69 @@ const getRideRequests = async (req, res) => {
     const ambulanceId = req.user.userId;
     const { status, page = 1, limit = 20 } = req.query;
 
-    console.log('=== GET RIDE REQUESTS ===');
-    console.log('Ambulance ID:', ambulanceId);
-    console.log('Status filter:', status);
-    console.log('Page:', page, 'Limit:', limit);
+    const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
 
-    const { Booking } = await import('../models/Booking.model.js');
-    
-    // Build query
-    const query = {
-      provider: ambulanceId,
-      serviceType: ServiceType.AMBULANCE,
-    };
+    // TEMPORARY FIX: Add this ambulance to existing bookings that have empty notifiedProviders
+    const bookingsToFix = await RealTimeBooking.find({
+      serviceType: 'ambulance',
+      status: 'requested',
+      notifiedProviders: { $size: 0 }
+    });
 
-    // Add status filter if provided and not 'all'
-    if (status && status !== 'all') {
-      query.status = status;
+    if (bookingsToFix.length > 0) {
+      await RealTimeBooking.updateMany(
+        {
+          serviceType: 'ambulance',
+          status: 'requested',
+          notifiedProviders: { $size: 0 }
+        },
+        {
+          $push: {
+            notifiedProviders: {
+              provider: ambulanceId,
+              notifiedAt: new Date(),
+              viewed: false
+            }
+          }
+        }
+      );
     }
 
-    console.log('Query:', JSON.stringify(query, null, 2));
+    // Build query — show requests notified to this ambulance OR accepted by this ambulance
+    const query = {
+      serviceType: 'ambulance',
+      $or: [
+        { acceptedProvider: ambulanceId },
+        {
+          'notifiedProviders.provider': ambulanceId,
+          status: { $in: ['pending', 'requested'] },
+          acceptedProvider: null,
+          $or: [
+            { expiresAt: { $exists: false } },
+            { expiresAt: { $gt: new Date() } },
+          ],
+        },
+      ],
+      status: { $nin: ['cancelled', 'expired'] },
+    };
+
+    // Override status filter if explicitly provided
+    if (status && status !== 'all') {
+      delete query.status;
+      query.status = status;
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const [bookings, total] = await Promise.all([
-      Booking.find(query)
-        .populate('patient', 'firstName lastName phone email')
+      RealTimeBooking.find(query)
+        .populate('patient', 'firstName lastName phone email gender age profilePicture')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit)),
-      Booking.countDocuments(query),
+        .limit(parseInt(limit))
+        .lean(),
+      RealTimeBooking.countDocuments(query),
     ]);
-
-    console.log(`Found ${bookings.length} bookings (total: ${total})`);
 
     res.json(
       paginatedResponse('Ride requests fetched', bookings, parseInt(page), parseInt(limit), total)
@@ -117,53 +147,13 @@ const acceptRide = async (req, res) => {
     const { id } = req.params;
     const ambulanceId = req.user.userId;
 
-    console.log('=== ACCEPT RIDE ===');
-    console.log('Booking ID:', id);
-    console.log('Ambulance ID:', ambulanceId);
-
-    const { Booking } = await import('../models/Booking.model.js');
-    
-    // Find the booking first
-    const booking = await Booking.findById(id);
-    
-    if (!booking) {
-      console.log('ERROR: Booking not found');
-      return res.status(404).json(errorResponse('Booking not found'));
-    }
-
-    console.log('Booking found:', {
-      id: booking._id,
-      status: booking.status,
-      provider: booking.provider,
-      serviceType: booking.serviceType,
-    });
-
-    // Check if booking is assigned to this ambulance
-    if (booking.provider.toString() !== ambulanceId) {
-      console.log('ERROR: Booking not assigned to this ambulance');
-      return res.status(403).json(errorResponse('This booking is not assigned to you'));
-    }
-
-    // Check if booking is in correct status
-    if (booking.status !== 'requested') {
-      console.log('ERROR: Booking already processed. Current status:', booking.status);
-      return res.status(400).json(errorResponse(`Booking is already ${booking.status}`));
-    }
-
-    // Update booking status to accepted
-    booking.status = 'accepted';
-    booking.acceptedAt = new Date();
-    await booking.save();
-
-    console.log('Booking accepted successfully');
-
-    // Populate patient details for response
-    await booking.populate('patient', 'firstName lastName phone email');
+    // Delegate to realTimeBookingService which handles race conditions atomically
+    const booking = await realTimeBookingService.acceptBooking(id, ambulanceId);
 
     res.json(successResponse('Ride accepted', booking));
   } catch (error) {
     console.error('Accept ride error:', error);
-    res.status(error.statusCode || 500)
+    res.status(error.status || error.statusCode || 500)
       .json(errorResponse(error.message || 'Failed to accept ride'));
   }
 };
@@ -173,13 +163,37 @@ const startRide = async (req, res) => {
     const { id } = req.params;
     const ambulanceId = req.user.userId;
 
-    const booking = await bookingService.updateBookingStatus(
-      id,
-      ambulanceId,
-      BookingStatus.ON_THE_WAY
-    );
+    const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+    const booking = await RealTimeBooking.findOne({ 
+      _id: id, 
+      acceptedProvider: ambulanceId,
+      status: 'accepted'
+    });
+    
+    if (!booking) return res.status(404).json(errorResponse('Booking not found'));
+    if (booking.status !== 'accepted') return res.status(400).json(errorResponse(`Cannot start ride. Current status: ${booking.status}`));
 
-    res.json(successResponse('Ride started', booking));
+    booking.status = 'on_the_way';
+    booking.onTheWayAt = new Date();
+    booking.startTime = new Date();
+    await booking.save();
+
+    // Emit status update to patient
+    try {
+      const { getSocketHandler } = await import('../socket/socket.handler.js');
+      const socketHandler = getSocketHandler();
+      socketHandler.emitToUser(booking.patient.toString(), 'booking:status:updated', {
+        bookingId: id,
+        status: 'on_the_way',
+        message: 'Ambulance is on the way',
+        timestamp: new Date(),
+      });
+    } catch (socketError) {
+      console.error('Socket emit error:', socketError.message);
+    }
+
+    await booking.populate('patient', 'firstName lastName phone email');
+    res.json(successResponse('Ride started - On the way', booking));
   } catch (error) {
     res.status(error.statusCode || 500)
       .json(errorResponse(error.message || 'Failed to start ride'));
@@ -191,36 +205,81 @@ const arriveAtPickup = async (req, res) => {
     const { id } = req.params;
     const ambulanceId = req.user.userId;
 
-    const booking = await bookingService.updateBookingStatus(
-      id,
-      ambulanceId,
-      BookingStatus.IN_PROGRESS
-    );
+    const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+    const booking = await RealTimeBooking.findOne({ 
+      _id: id, 
+      acceptedProvider: ambulanceId,
+      status: 'on_the_way'
+    });
+    
+    if (!booking) return res.status(404).json(errorResponse('Booking not found'));
+    if (booking.status !== 'on_the_way') return res.status(400).json(errorResponse(`Cannot arrive at pickup. Current status: ${booking.status}`));
 
-    res.json(successResponse('Arrived at pickup', booking));
+    booking.status = 'in_progress';
+    booking.atPickupAt = new Date();
+    await booking.save();
+
+    // Emit status update to patient
+    try {
+      const { getSocketHandler } = await import('../socket/socket.handler.js');
+      const socketHandler = getSocketHandler();
+      socketHandler.emitToUser(booking.patient.toString(), 'booking:status:updated', {
+        bookingId: id,
+        status: 'in_progress',
+        message: 'Ambulance has arrived at pickup point',
+        timestamp: new Date(),
+      });
+    } catch (socketError) {
+      console.error('Socket emit error:', socketError.message);
+    }
+
+    await booking.populate('patient', 'firstName lastName phone email');
+    res.json(successResponse('Arrived at pickup point', booking));
   } catch (error) {
     res.status(error.statusCode || 500)
       .json(errorResponse(error.message || 'Failed to update status'));
   }
 };
 
-
 const completeRide = async (req, res) => {
   try {
     const { id } = req.params;
     const ambulanceId = req.user.userId;
 
-    const booking = await bookingService.updateBookingStatus(
-      id,
-      ambulanceId,
-      BookingStatus.COMPLETED
-    );
-
-    const { User } = await import('../models/User.model.js');
-    await User.findByIdAndUpdate(ambulanceId, {
-      $inc: { totalRides: 1 },
+    const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+    const booking = await RealTimeBooking.findOne({ 
+      _id: id, 
+      acceptedProvider: ambulanceId,
+      status: 'in_progress'
     });
+    
+    if (!booking) return res.status(404).json(errorResponse('Booking not found'));
+    if (booking.status !== 'in_progress') return res.status(400).json(errorResponse(`Cannot complete ride. Current status: ${booking.status}`));
 
+    booking.status = 'completed';
+    booking.atDropAt = new Date();
+    booking.endTime = new Date();
+    await booking.save();
+
+    // Increment totalRides
+    const { User } = await import('../models/User.model.js');
+    await User.findByIdAndUpdate(ambulanceId, { $inc: { totalRides: 1 } });
+
+    // Emit status update to patient
+    try {
+      const { getSocketHandler } = await import('../socket/socket.handler.js');
+      const socketHandler = getSocketHandler();
+      socketHandler.emitToUser(booking.patient.toString(), 'booking:status:updated', {
+        bookingId: id,
+        status: 'completed',
+        message: 'Service completed. Ambulance has reached the drop point.',
+        timestamp: new Date(),
+      });
+    } catch (socketError) {
+      console.error('Socket emit error:', socketError.message);
+    }
+
+    await booking.populate('patient', 'firstName lastName phone email');
     res.json(successResponse('Ride completed', booking));
   } catch (error) {
     res.status(error.statusCode || 500)
@@ -233,22 +292,26 @@ const getDashboard = async (req, res) => {
     const ambulanceId = req.user.userId;
 
     const { User } = await import('../models/User.model.js');
-    const { Booking } = await import('../models/Booking.model.js');
+    const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
     
     const [activeRides, completedRides, ambulance] = await Promise.all([
-      bookingService.getActiveBookings(ambulanceId, 'provider'),
-      Booking.countDocuments({
-        provider: ambulanceId,
-        serviceType: ServiceType.AMBULANCE,
-        status: BookingStatus.COMPLETED,
+      RealTimeBooking.countDocuments({
+        acceptedProvider: ambulanceId,
+        serviceType: 'ambulance',
+        status: { $in: ['accepted', 'on_the_way', 'in_progress'] },
+      }),
+      RealTimeBooking.countDocuments({
+        acceptedProvider: ambulanceId,
+        serviceType: 'ambulance',
+        status: 'completed',
       }),
       User.findById(ambulanceId).select('-password'),
     ]);
 
     const dashboardData = {
-      activeRides: activeRides.length,
-      totalRides: completedRides, // Use actual count from database
-      completedRides: completedRides, // Add explicit completed rides count
+      activeRides,
+      totalRides: completedRides,
+      completedRides,
       isAvailable: ambulance?.isAvailable || false,
       rating: ambulance?.rating || 0,
       vehicleType: ambulance?.vehicleType,
@@ -265,15 +328,19 @@ const getRideDetails = async (req, res) => {
     const { id } = req.params;
     const ambulanceId = req.user.userId;
 
-    const { Booking } = await import('../models/Booking.model.js');
+    const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
     
-    const booking = await Booking.findOne({
+    // Check if booking exists and ambulance has access to it
+    const booking = await RealTimeBooking.findOne({
       _id: id,
-      provider: ambulanceId,
+      $or: [
+        { acceptedProvider: ambulanceId },
+        { 'notifiedProviders.provider': ambulanceId }
+      ]
     }).populate('patient', 'firstName lastName phone email age gender');
 
     if (!booking) {
-      return res.status(404).json(errorResponse('Booking not found'));
+      return res.status(404).json(errorResponse('Booking not found or access denied'));
     }
 
     res.json(successResponse('Ride details fetched', booking));
@@ -281,8 +348,6 @@ const getRideDetails = async (req, res) => {
     res.status(500).json(errorResponse(error.message || 'Failed to fetch ride details'));
   }
 };
-
-// ==================== NEW FUNCTIONS ====================
 
 const updateLiveLocation = async (req, res) => {
   try {
@@ -308,10 +373,10 @@ const updateLiveLocation = async (req, res) => {
 
     // If bookingId provided, update booking and emit socket event
     if (bookingId) {
-      const { Booking } = await import('../models/Booking.model.js');
-      const booking = await Booking.findById(bookingId);
+      const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+      const booking = await RealTimeBooking.findById(bookingId);
 
-      if (booking && booking.provider.toString() === ambulanceId) {
+      if (booking && booking.acceptedProvider.toString() === ambulanceId) {
         // Update booking with current location
         booking.providerLocation = {
           type: 'Point',
@@ -324,8 +389,8 @@ const updateLiveLocation = async (req, res) => {
         const eta = calculateETA(
           { lat: latitude, lng: longitude },
           { 
-            lat: booking.location?.coordinates?.[1] || booking.pickupLocation?.coordinates?.[1],
-            lng: booking.location?.coordinates?.[0] || booking.pickupLocation?.coordinates?.[0]
+            lat: booking.location?.coordinates?.[1],
+            lng: booking.location?.coordinates?.[0]
           }
         );
 
@@ -350,7 +415,6 @@ const updateLiveLocation = async (req, res) => {
           });
         } catch (socketError) {
           console.error('Socket emit error:', socketError.message);
-          // Continue even if socket fails
         }
 
         return res.json(successResponse('Live location updated', {
@@ -378,10 +442,10 @@ const markPatientLoaded = async (req, res) => {
     const { id } = req.params;
     const ambulanceId = req.user.userId;
 
-    const { Booking } = await import('../models/Booking.model.js');
-    const booking = await Booking.findOne({
+    const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+    const booking = await RealTimeBooking.findOne({
       _id: id,
-      provider: ambulanceId,
+      acceptedProvider: ambulanceId,
     });
 
     if (!booking) {
@@ -421,10 +485,10 @@ const markHospitalReached = async (req, res) => {
     const ambulanceId = req.user.userId;
     const { hospitalName, hospitalAddress } = req.body;
 
-    const { Booking } = await import('../models/Booking.model.js');
-    const booking = await Booking.findOne({
+    const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+    const booking = await RealTimeBooking.findOne({
       _id: id,
-      provider: ambulanceId,
+      acceptedProvider: ambulanceId,
     });
 
     if (!booking) {

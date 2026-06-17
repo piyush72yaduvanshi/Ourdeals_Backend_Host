@@ -8,7 +8,7 @@ const {
   resetSecret: JWT_RESET_SECRET,
 } = envConfig.jwt;
 
-const ACCESS_TOKEN_EXPIRY = "15m";
+const ACCESS_TOKEN_EXPIRY = "12h";
 const REFRESH_TOKEN_EXPIRY = "7d";
 const RESET_TOKEN_EXPIRY = "10m";
 

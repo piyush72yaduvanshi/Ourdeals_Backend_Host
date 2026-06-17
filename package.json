@@ -9,10 +9,9 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "indexes": "node src/scripts/add-indexes.js",
-    "test": "node test-api.js",
-    "test:postman": "node generate-test-collection.js",
-    "test:advanced": "node test-advanced-features.js"
+    "seed": "node src/utils/seed.js",
+    "test:users": "node test-user-count.js",
+    "indexes": "node src/scripts/add-indexes.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1029.0",

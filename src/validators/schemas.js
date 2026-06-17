@@ -21,8 +21,11 @@ const SERVICE_TYPES = [
 ];
 
 const BOOKING_STATUS = [
+  "in_cart",
   "requested",
   "accepted",
+  "packing_medicines",
+  "out_for_delivery",
   "on_the_way",
   "in_progress",
   "completed",
@@ -78,6 +81,20 @@ const registerSchema = Joi.object({
     then: Joi.string().required(),
   }),
 
+  category: Joi.when("role", {
+    is: "doctor",
+    then: Joi.string().valid(
+      'General Physician',
+      'Dermatology',
+      'Gynecology',
+      'Mental Wellness',
+      'Sexology',
+      'Stomach & Digestion',
+      'Pediatrics',
+      'Orthodpedic'
+    ).optional().default('General Physician'),
+  }),
+
   qualifications: Joi.when("role", {
     is: "doctor",
     then: Joi.array().items(Joi.string()),
@@ -101,8 +118,8 @@ const registerSchema = Joi.object({
   consultationTypes: Joi.when("role", {
     is: "doctor",
     then: Joi.array().items(
-      Joi.string().valid("video-call", "in-person", "phone-call")
-    ).min(1).required(),
+      Joi.string().valid("video-call", "audio-call")
+    ).min(1).default(["video-call"]),
   }),
 
   about: Joi.when("role", {
@@ -163,6 +180,11 @@ const registerSchema = Joi.object({
     then: Joi.string(),
   }),
 
+  inchargeName: Joi.when("role", {
+    is: "bloodbank",
+    then: Joi.string().required(),
+  }),
+
   testsOffered: Joi.when("role", {
     is: "pathology",
     then: Joi.array().items(Joi.object()),
@@ -194,6 +216,21 @@ const registerSchema = Joi.object({
     then: Joi.string().required(),
   }),
 
+  pharmacistName: Joi.when("role", {
+    is: "pharmacist",
+    then: Joi.string().required(),
+  }),
+
+  pharmacistRegistrationNumber: Joi.when("role", {
+    is: "pharmacist",
+    then: Joi.string().required(),
+  }),
+
+  servicesAvailable: Joi.when("role", {
+    is: Joi.valid("pharmacist", "bloodbank"),
+    then: Joi.array().items(Joi.string()).min(1).required(),
+  }),
+
   vehicleNumber: Joi.when("role", {
     is: "ambulance",
     then: Joi.string().required(),
@@ -208,7 +245,14 @@ const registerSchema = Joi.object({
 
   driverName: Joi.when("role", {
     is: "ambulance",
-    then: Joi.string(),
+    then: Joi.string().required(),
+  }),
+
+  driverMobileNumber: Joi.when("role", {
+    is: "ambulance",
+    then: Joi.string()
+      .pattern(/^\+?[1-9]\d{9,14}$/)
+      .required(),
   }),
 
   driverLicense: Joi.when("role", {
@@ -268,6 +312,26 @@ const createBookingSchema = Joi.object({
     .valid(...SERVICE_TYPES)
     .required(),
 
+  name: Joi.string().trim().when('serviceType', {
+    is: 'doctor',
+    then: Joi.optional()
+  }),
+
+  category: Joi.string().valid(
+    'General Physician',
+    'Dermatology',
+    'Gynecology',
+    'Mental Wellness',
+    'Sexology',
+    'Stomach & Digestion',
+    'Pediatrics',
+    'Orthodpedic'
+  ).when('serviceType', {
+    is: 'doctor',
+    then: Joi.required(),
+    otherwise: Joi.forbidden()
+  }),
+
   scheduledTime: Joi.date().iso(),
 
   // Made optional - not all bookings need time slots
@@ -279,9 +343,9 @@ const createBookingSchema = Joi.object({
   }).optional(),
 
   // Consultation type for doctor bookings
-  consultationType: Joi.string().valid('in-person', 'video-call', 'phone-call').when('serviceType', {
+  consultationType: Joi.string().valid('video-call').when('serviceType', {
     is: 'doctor',
-    then: Joi.required(),
+    then: Joi.optional().default('video-call'),
     otherwise: Joi.forbidden()
   }),
 
@@ -314,6 +378,11 @@ const createBookingSchema = Joi.object({
   longitude: Joi.number().min(-180).max(180),
   address: Joi.string().trim(),
 
+  hospitalName: Joi.string().trim().optional(),
+  patientName: Joi.string().trim().optional(),
+  contactNumber: Joi.string().trim().optional(),
+  phone: Joi.string().trim().optional(),
+
   // Medicine order items
   items: Joi.array().items(
     Joi.object({
@@ -343,13 +412,13 @@ const createBookingSchema = Joi.object({
   
   // Blood bank specific fields
   bloodGroup: Joi.string().valid('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-').when('serviceType', {
-    is: 'bloodbank',
-    then: Joi.required(),
+    is: Joi.valid('bloodbank', 'ambulance'),
+    then: Joi.optional(),
     otherwise: Joi.forbidden()
   }),
   unitsRequired: Joi.number().min(1).max(10).when('serviceType', {
-    is: 'bloodbank',
-    then: Joi.required(),
+    is: Joi.valid('bloodbank', 'ambulance'),
+    then: Joi.optional(),
     otherwise: Joi.forbidden()
   }),
   

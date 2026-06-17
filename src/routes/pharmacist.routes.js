@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 
 import {
   updateProfile,
@@ -12,6 +12,7 @@ import {
   updateOrderStatus,
   updateStock,
   getDashboard,
+  submitOffer,
 } from '../controller/pharmacist.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
@@ -72,6 +73,12 @@ router.post(
   '/orders/:id/accept',
   validateParams(idParamSchema),
   acceptOrder
+);
+
+router.post(
+  '/orders/:id/offer',
+  validateParams(idParamSchema),
+  submitOffer
 );
 
 router.put(

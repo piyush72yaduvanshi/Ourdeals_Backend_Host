@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Prescription } from '../models/Prescription.model.js';
 import { Booking } from '../models/Booking.model.js';
 import { notificationService } from '../services/notification.service.js';
@@ -21,20 +22,91 @@ export const createPrescription = async (req, res) => {
       notes,
     } = req.body;
 
-    // Validate booking
-    const booking = await Booking.findOne({
-      _id: bookingId,
-      provider: doctorId,
-      status: 'completed',
+    // Validate bookingId format
+    if (!bookingId || typeof bookingId !== 'string') {
+      logger.error('Invalid bookingId format', { 
+        bookingId,
+        type: typeof bookingId,
+      });
+      return res.status(400).json(errorResponse('Invalid bookingId format'));
+    }
+
+    // Validate bookingId is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      logger.error('Invalid MongoDB ObjectId', { 
+        bookingId,
+        isValid: mongoose.Types.ObjectId.isValid(bookingId),
+      });
+      return res.status(400).json(errorResponse('Invalid booking ID format'));
+    }
+
+    // Log for debugging
+    logger.info('Creating prescription - START', { 
+      doctorId, 
+      bookingId,
+      requestBody: req.body,
+    });
+
+    // Validate booking - check with string comparison first
+    let booking = await Booking.findOne({
+      _id: new mongoose.Types.ObjectId(bookingId),
     }).populate('patient');
 
+    logger.info('Booking query result', { 
+      bookingId,
+      bookingFound: !!booking,
+      bookingData: booking ? {
+        id: booking._id,
+        provider: booking.provider,
+        status: booking.status,
+        serviceType: booking.serviceType,
+      } : null,
+    });
+
     if (!booking) {
-      return res.status(404).json(errorResponse('Booking not found or not completed'));
+      logger.error('Booking not found in database', { 
+        bookingId,
+        doctorId,
+        searchQuery: { _id: bookingId },
+      });
+      return res.status(404).json(errorResponse('Booking not found'));
+    }
+
+    // Check if doctor is the provider (convert both to strings for comparison)
+    const bookingProviderId = booking.provider ? booking.provider.toString() : null;
+    logger.info('Provider verification', { 
+      doctorId,
+      bookingProviderId,
+      match: bookingProviderId === doctorId,
+    });
+
+    if (!bookingProviderId || bookingProviderId !== doctorId) {
+      logger.error('Doctor not authorized for this booking', { 
+        doctorId, 
+        bookingProviderId,
+        bookingId,
+      });
+      return res.status(403).json(errorResponse('You are not the provider for this booking'));
+    }
+
+    // Check booking status
+    logger.info('Booking status check', { 
+      status: booking.status,
+      isValid: ['in_progress', 'completed'].includes(booking.status),
+    });
+
+    if (!['in_progress', 'completed'].includes(booking.status)) {
+      logger.error('Booking status not valid for prescription', { 
+        status: booking.status,
+        bookingId,
+      });
+      return res.status(400).json(errorResponse(`Booking must be in progress or completed. Current status: ${booking.status}`));
     }
 
     // Check if prescription already exists
     const existingPrescription = await Prescription.findOne({ booking: bookingId });
     if (existingPrescription) {
+      logger.warn('Prescription already exists', { bookingId });
       return res.status(400).json(errorResponse('Prescription already exists for this booking'));
     }
 
@@ -69,15 +141,20 @@ export const createPrescription = async (req, res) => {
       });
     }
 
-    logger.info('Prescription created', {
+    logger.info('Prescription created successfully', {
       prescriptionId: prescription._id,
       bookingId,
+      doctorId,
     });
 
     res.status(201).json(successResponse('Prescription created successfully', prescription));
   } catch (error) {
-    logger.error('Create prescription failed', { error: error.message });
-    res.status(400).json(errorResponse(error.message));
+    logger.error('Create prescription failed', { 
+      error: error.message,
+      stack: error.stack,
+      requestBody: req.body,
+    });
+    res.status(500).json(errorResponse(error.message || 'Failed to create prescription'));
   }
 };
 

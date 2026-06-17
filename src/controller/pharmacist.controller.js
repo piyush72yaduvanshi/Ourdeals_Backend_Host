@@ -1,4 +1,4 @@
-﻿import { Medicine } from '../models/Medicine.model.js';
+import { Medicine } from '../models/Medicine.model.js';
 import { Pharmacist } from '../models/Pharmacist.model.js';
 import { bookingService } from '../services/booking.service.js';
 import { successResponse, errorResponse, paginatedResponse } from '../utils/response.util.js';
@@ -128,25 +128,53 @@ const getOrders = async (req, res) => {
     const pharmacistId = req.user.userId;
     const { status, page = 1, limit = 20 } = req.query;
 
-    // Import RealTimeBooking model
+    // Import RealTimeBooking model and User model
     const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+    const { User } = await import('../models/User.model.js');
+
+    // Get pharmacist's city and state for geo-fencing
+    const pharmacist = await User.findById(pharmacistId).select('city state status').lean();
+    if (!pharmacist || pharmacist.status !== 'approved') {
+      return res.json(paginatedResponse('Orders fetched', [], 1, Number(limit), 0));
+    }
 
     // Build query for pharmacist orders
     const query = {
       serviceType: 'pharmacist',
     };
 
+    // Build city/state filter for pending orders (case-insensitive)
+    const locationFilter = {};
+    if (pharmacist.city && pharmacist.city.trim()) {
+      locationFilter.city = { $regex: new RegExp(`^${pharmacist.city.trim()}$`, 'i') };
+    }
+    if (pharmacist.state && pharmacist.state.trim()) {
+      locationFilter.state = { $regex: new RegExp(`^${pharmacist.state.trim()}$`, 'i') };
+    }
+
     // If status is 'all', show both pending orders and accepted orders by this pharmacist
     if (status === 'all') {
       query.$or = [
         { acceptedProvider: pharmacistId }, // Orders accepted by this pharmacist
-        { status: 'pending', acceptedProvider: { $exists: false } }, // Pending orders available to all
+        { 
+          status: { $in: ['pending', 'requested'] }, 
+          acceptedProvider: { $exists: false },
+          ...locationFilter,
+          $or: [
+            { expiresAt: { $exists: false } }, // Orders without expiration
+            { expiresAt: { $gt: new Date() } }, // Orders not yet expired
+          ],
+        }, // Pending/requested orders in same city/state
       ];
     } else if (status === 'pending' || status === 'requested') {
-      // Show only pending orders not yet accepted by anyone
-      // Support both 'pending' and 'requested' for flexibility
-      query.status = 'pending';
+      // Show only pending/requested orders not yet accepted by anyone, in same city/state
+      query.status = { $in: ['pending', 'requested'] };
       query.acceptedProvider = { $exists: false };
+      Object.assign(query, locationFilter);
+      query.$or = [
+        { expiresAt: { $exists: false } }, // Orders without expiration
+        { expiresAt: { $gt: new Date() } }, // Orders not yet expired
+      ];
     } else if (status === 'confirmed' || status === 'accepted') {
       // Show accepted/confirmed orders by this pharmacist
       query.status = { $in: ['accepted', 'on_the_way', 'in_progress'] };
@@ -160,10 +188,18 @@ const getOrders = async (req, res) => {
       query.status = status;
       query.acceptedProvider = pharmacistId;
     } else {
-      // Default: show both pending orders and accepted orders (same as 'all')
+      // Default: show both pending/requested orders (filtered by city/state) and accepted orders
       query.$or = [
         { acceptedProvider: pharmacistId }, // Orders accepted by this pharmacist
-        { status: 'pending', acceptedProvider: { $exists: false } }, // Pending orders available to all
+        { 
+          status: { $in: ['pending', 'requested'] }, 
+          acceptedProvider: { $exists: false },
+          ...locationFilter,
+          $or: [
+            { expiresAt: { $exists: false } }, // Orders without expiration
+            { expiresAt: { $gt: new Date() } }, // Orders not yet expired
+          ],
+        }, // Pending/requested orders in same city/state
       ];
     }
 
@@ -182,11 +218,22 @@ const getOrders = async (req, res) => {
     ]);
 
     // Transform orders to include flattened patient info and delivery address
-    const transformedOrders = orders.map(order => ({
-      ...order,
-      patientName: order.patient ? `${order.patient.firstName} ${order.patient.lastName}` : 'Unknown',
-      patientPhone: order.patient?.phone || 'N/A',
-      deliveryAddress: order.location?.address || 'N/A',
+    const { s3Service } = await import('../services/s3.service.js');
+    const transformedOrders = await Promise.all(orders.map(async (order) => {
+      const transformed = {
+        ...order,
+        patientName: order.patient ? `${order.patient.firstName} ${order.patient.lastName}` : 'Unknown',
+        patientPhone: order.patient?.phone || 'N/A',
+        deliveryAddress: order.location?.address || 'N/A',
+      };
+      
+      if (transformed.prescriptionImages && transformed.prescriptionImages.length > 0) {
+        transformed.prescriptionImagesSigned = await Promise.all(
+          transformed.prescriptionImages.map(img => s3Service.getSignedUrl(img))
+        );
+      }
+      
+      return transformed;
     }));
 
     res.json(
@@ -200,15 +247,35 @@ const getOrders = async (req, res) => {
 
 const getPendingOrders = async (req, res) => {
   try {
+    const pharmacistId = req.user.userId;
     const { page = 1, limit = 20 } = req.query;
     const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+    const { User } = await import('../models/User.model.js');
 
-    // Find all pending medicine orders without assigned provider
+    // Get pharmacist's city and state for geo-fencing
+    const pharmacist = await User.findById(pharmacistId).select('city state status').lean();
+    if (!pharmacist || pharmacist.status !== 'approved') {
+      return res.json(paginatedResponse('Pending orders fetched', [], 1, Number(limit), 0));
+    }
+
+    // Find pending/requested medicine orders filtered by pharmacist's city and state
     const query = {
       serviceType: 'pharmacist',
-      status: 'pending',
+      status: { $in: ['pending', 'requested'] },
       acceptedProvider: { $exists: false }, // Orders not yet accepted by any pharmacist
+      $or: [
+        { expiresAt: { $exists: false } }, // Orders without expiration
+        { expiresAt: { $gt: new Date() } }, // Orders not yet expired
+      ],
     };
+
+    // Geo-fence: only show orders from same city and state
+    if (pharmacist.city && pharmacist.city.trim()) {
+      query.city = { $regex: new RegExp(`^${pharmacist.city.trim()}$`, 'i') };
+    }
+    if (pharmacist.state && pharmacist.state.trim()) {
+      query.state = { $regex: new RegExp(`^${pharmacist.state.trim()}$`, 'i') };
+    }
 
     const skip = (Number(page) - 1) * Number(limit);
 
@@ -224,11 +291,22 @@ const getPendingOrders = async (req, res) => {
     ]);
 
     // Transform orders to include flattened patient info and delivery address
-    const transformedOrders = orders.map(order => ({
-      ...order,
-      patientName: order.patient ? `${order.patient.firstName} ${order.patient.lastName}` : 'Unknown',
-      patientPhone: order.patient?.phone || 'N/A',
-      deliveryAddress: order.location?.address || 'N/A',
+    const { s3Service } = await import('../services/s3.service.js');
+    const transformedOrders = await Promise.all(orders.map(async (order) => {
+      const transformed = {
+        ...order,
+        patientName: order.patient ? `${order.patient.firstName} ${order.patient.lastName}` : 'Unknown',
+        patientPhone: order.patient?.phone || 'N/A',
+        deliveryAddress: order.location?.address || 'N/A',
+      };
+      
+      if (transformed.prescriptionImages && transformed.prescriptionImages.length > 0) {
+        transformed.prescriptionImagesSigned = await Promise.all(
+          transformed.prescriptionImages.map(img => s3Service.getSignedUrl(img))
+        );
+      }
+      
+      return transformed;
     }));
 
     res.json(
@@ -252,7 +330,9 @@ const acceptOrder = async (req, res) => {
 
     res.json(successResponse('Order accepted', booking));
   } catch (error) {
-    res.status(error.statusCode || 500)
+    // Return 403 for unapproved accounts instead of 500
+    const statusCode = error.message?.includes('not approved') ? 403 : (error.status || error.statusCode || 500);
+    res.status(statusCode)
       .json(errorResponse(error.message || 'Failed to accept order'));
   }
 };
@@ -306,17 +386,45 @@ const getDashboard = async (req, res) => {
     const pharmacistId = req.user.userId;
 
     const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+    const { User } = await import('../models/User.model.js');
+
+    // Get pharmacist's city and state for geo-fencing
+    const pharmacistUser = await User.findById(pharmacistId).select('city state status').lean();
+    if (!pharmacistUser || pharmacistUser.status !== 'approved') {
+      return res.json(successResponse('Dashboard data fetched', {
+        pendingOrders: 0,
+        activeOrders: 0,
+        completedOrders: 0,
+        totalOrders: 0,
+        totalMedicines: 0,
+        lowStockItems: 0,
+        rating: { average: 0, count: 0 },
+      }));
+    }
+
+    // Build location filter for pending orders
+    const pendingQuery = {
+      serviceType: 'pharmacist',
+      status: { $in: ['pending', 'requested'] },
+      acceptedProvider: { $exists: false },
+      $or: [
+        { expiresAt: { $exists: false } },
+        { expiresAt: { $gt: new Date() } },
+      ],
+    };
+    if (pharmacistUser.city && pharmacistUser.city.trim()) {
+      pendingQuery.city = { $regex: new RegExp(`^${pharmacistUser.city.trim()}$`, 'i') };
+    }
+    if (pharmacistUser.state && pharmacistUser.state.trim()) {
+      pendingQuery.state = { $regex: new RegExp(`^${pharmacistUser.state.trim()}$`, 'i') };
+    }
 
     const [pendingOrders, activeOrders, completedOrders, pharmacist, totalMedicines, lowStock] = await Promise.all([
-      RealTimeBooking.countDocuments({
-        serviceType: 'pharmacist',
-        status: 'pending',
-        acceptedProvider: { $exists: false },
-      }),
+      RealTimeBooking.countDocuments(pendingQuery),
       RealTimeBooking.countDocuments({
         serviceType: 'pharmacist',
         acceptedProvider: pharmacistId,
-        status: { $in: ['accepted', 'on_the_way', 'in_progress'] },
+        status: { $in: ['accepted', 'preparing', 'ready', 'on_the_way', 'in_progress'] },
       }),
       RealTimeBooking.countDocuments({
         serviceType: 'pharmacist',
@@ -344,6 +452,76 @@ const getDashboard = async (req, res) => {
   }
 };
 
+
+const submitOffer = async (req, res) => {
+  try {
+    const pharmacistId = req.user.userId;
+    const { id } = req.params;
+    const { amount, deliveryTime } = req.body;
+
+    if (!amount || !deliveryTime) {
+      return res.status(400).json(errorResponse('Amount and delivery time are required'));
+    }
+
+    const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+    const { notificationService } = await import('../services/notification.service.js');
+    const { getSocketHandler } = await import('../socket/socket.handler.js');
+
+    const booking = await RealTimeBooking.findById(id);
+
+    if (!booking) {
+      return res.status(404).json(errorResponse('Booking not found'));
+    }
+
+    if (booking.status !== 'requested') {
+      return res.status(400).json(errorResponse('Booking is no longer accepting offers'));
+    }
+
+    // Check if offer already submitted by this vendor
+    const existingOffer = booking.offers?.find(o => o.vendorId.toString() === pharmacistId.toString());
+    if (existingOffer) {
+      return res.status(400).json(errorResponse('You have already submitted an offer for this order'));
+    }
+
+    // Add new offer
+    const newOffer = {
+      vendorId: pharmacistId,
+      amount: Number(amount),
+      deliveryTime,
+      status: 'pending',
+      createdAt: new Date()
+    };
+
+    if (!booking.offers) {
+      booking.offers = [];
+    }
+    
+    booking.offers.push(newOffer);
+    await booking.save();
+
+    // Notify patient
+    await notificationService.send({
+      recipient: booking.patient,
+      sender: pharmacistId,
+      type: "booking_update",
+      title: "New Prescription Offer",
+      message: `A pharmacy has submitted an offer of ₹${amount} for your prescription.`,
+      data: { bookingId: booking._id },
+      sendPush: true,
+    });
+
+    const socketHandler = getSocketHandler();
+    socketHandler.emitToUser(booking.patient.toString(), "booking:new_offer", {
+      bookingId: booking._id,
+      offer: newOffer
+    });
+
+    res.json(successResponse('Offer submitted successfully. Waiting for patient approval.', newOffer));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message || 'Failed to submit offer'));
+  }
+};
+
 export {
   updateProfile,
   addMedicine,
@@ -356,4 +534,5 @@ export {
   updateOrderStatus,
   updateStock,
   getDashboard,
+  submitOffer,
 };

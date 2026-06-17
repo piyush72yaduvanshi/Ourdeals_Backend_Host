@@ -7,6 +7,7 @@ const UserRole = {
   AMBULANCE: "ambulance",
   BLOOD_BANK: "bloodbank",
   PATHOLOGY: "pathology",
+  LABTEST: "labtest",
 };
 
 const UserStatus = {
@@ -33,6 +34,7 @@ const ServiceType = {
   PHARMACIST: "pharmacist",
   BLOOD_BANK: "bloodbank",
   PATHOLOGY: "pathology",
+  LABTEST: "labtest",
 };
 
 const BloodGroup = {

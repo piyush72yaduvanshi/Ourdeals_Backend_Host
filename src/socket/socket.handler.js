@@ -1,4 +1,4 @@
-﻿import { Server } from "socket.io";
+import { Server } from "socket.io";
 import { tokenService } from "../services/token.service.js";
 import { Booking } from "../models/Booking.model.js";
 import { logger } from "../utils/logger.util.js";
@@ -56,15 +56,24 @@ class SocketHandler {
 
       socket.on("location:update", async ({ bookingId, latitude, longitude }) => {
         try {
-          // Validate that only the assigned provider can update location
-          const booking = await Booking.findById(bookingId);
-          
+          if (!bookingId || !latitude || !longitude) return;
+
+          // Try RealTimeBooking first (ambulance uses this)
+          const { RealTimeBooking } = await import("../models/RealTimeBooking.model.js");
+          let booking = await RealTimeBooking.findById(bookingId);
+
           if (!booking) {
-            socket.emit("error", { message: "Booking not found" });
+            // Try legacy Booking model as fallback
+            booking = await Booking.findById(bookingId);
+          }
+
+          if (!booking) {
+            // Silently ignore - booking may have expired or been completed
             return;
           }
 
-          if (booking.provider.toString() !== socket.userId) {
+          const providerId = booking.acceptedProvider?.toString() || booking.provider?.toString();
+          if (providerId && providerId !== socket.userId) {
             socket.emit("error", { message: "Unauthorized to update location" });
             return;
           }
@@ -87,7 +96,7 @@ class SocketHandler {
           logger.info(`Location updated for booking: ${bookingId}`);
         } catch (error) {
           logger.error("Location update failed", { error: error.message });
-          socket.emit("error", { message: "Failed to update location" });
+          // Don't emit error to client - silently fail on location updates
         }
       });
 
@@ -96,6 +105,43 @@ class SocketHandler {
           status,
           timestamp: new Date(),
         });
+      });
+
+      // Video call tracking events
+      socket.on("call:doctor_join", async ({ bookingId }) => {
+        try {
+          const booking = await Booking.findById(bookingId);
+          if (booking) {
+            booking.doctor_on_call = true;
+            await booking.save();
+          }
+          this.io.to(`booking:${bookingId}`).emit("call:doctor_joined", {
+            bookingId,
+            doctor_on_call: true,
+            timestamp: new Date(),
+          });
+          logger.info(`Doctor joined call for booking: ${bookingId}`);
+        } catch (error) {
+          logger.error("Doctor join call failed", { error: error.message });
+        }
+      });
+
+      socket.on("call:patient_join", async ({ bookingId }) => {
+        try {
+          const booking = await Booking.findById(bookingId);
+          if (booking) {
+            booking.patient_on_call = true;
+            await booking.save();
+          }
+          this.io.to(`booking:${bookingId}`).emit("call:patient_joined", {
+            bookingId,
+            patient_on_call: true,
+            timestamp: new Date(),
+          });
+          logger.info(`Patient joined call for booking: ${bookingId}`);
+        } catch (error) {
+          logger.error("Patient join call failed", { error: error.message });
+        }
       });
 
       socket.on("disconnect", () => {

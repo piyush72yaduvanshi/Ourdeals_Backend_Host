@@ -12,6 +12,7 @@ const SERVICE_TYPE_TO_ROLE = {
   pharmacist: "pharmacist",
   bloodbank: "bloodbank",
   pathology: "pathology",
+  labtest: "pathology",
 };
 
 const createRealTimeBooking = async (bookingData) => {
@@ -20,39 +21,46 @@ const createRealTimeBooking = async (bookingData) => {
     await booking.save();
     await booking.populate("patient");
 
-    // Find nearby available providers
-    const providers = await findAvailableProviders(
-      booking.serviceType,
-      booking.location.coordinates,
-      booking.isEmergency
-    );
+    if (booking.status !== "in_cart") {
+      // Find available providers by city (or fallback to geo for doctor)
+      const providers = await findAvailableProviders(
+        booking.serviceType,
+        booking.location.coordinates,
+        booking.isEmergency,
+        booking.category,
+        booking.city,
+        booking.state
+      );
 
-    if (providers.length === 0) {
-      logger.warn(`No providers found for booking ${booking._id}`);
-      // Still create the booking, but notify patient
+      if (providers.length === 0) {
+        logger.warn(`No providers found for booking ${booking._id}`);
+        // Still create the booking, but notify patient
+        await notificationService.send({
+          recipient: booking.patient._id,
+          type: "booking_confirmation",
+          title: "Booking Created",
+          message: "We're searching for available providers. You'll be notified once someone accepts.",
+          data: { bookingId: booking._id },
+          sendPush: true,
+        });
+        return booking;
+      }
+
+      // Notify all providers via multiple channels
+      await notifyAllProviders(booking, providers);
+
+      // Send confirmation to patient
       await notificationService.send({
         recipient: booking.patient._id,
         type: "booking_confirmation",
         title: "Booking Created",
-        message: "We're searching for available providers. You'll be notified once someone accepts.",
+        message: "Your booking has been created and sent to nearby providers.",
         data: { bookingId: booking._id },
         sendPush: true,
       });
-      return booking;
     }
 
-    // Notify all providers via multiple channels
-    await notifyAllProviders(booking, providers);
-
-    // Send confirmation to patient
-    await notificationService.send({
-      recipient: booking.patient._id,
-      type: "booking_confirmation",
-      title: "Booking Request Sent",
-      message: `Your ${booking.serviceType} booking request has been sent to ${providers.length} nearby providers.`,
-      data: { bookingId: booking._id, providerCount: providers.length },
-      sendPush: true,
-    });
+    return booking;
 
     logger.info(`Real-time booking created: ${booking._id}, notified ${providers.length} providers`);
     return booking;
@@ -62,40 +70,66 @@ const createRealTimeBooking = async (bookingData) => {
   }
 };
 
-const findAvailableProviders = async (serviceType, coordinates, isEmergency) => {
+const findAvailableProviders = async (serviceType, coordinates, isEmergency, category, city, state) => {
   try {
     const role = SERVICE_TYPE_TO_ROLE[serviceType];
     if (!role) {
       throw new Error(`Invalid service type: ${serviceType}`);
     }
 
-    const maxDistance = isEmergency ? 20000 : 10000; // 20km for emergency, 10km for normal
-    const [longitude, latitude] = coordinates;
+    let limit = 50;
+    if (role === 'ambulance') limit = 20;
+
+    const rolesToSearch = [role];
+    // Pathology bookings also notify bloodbanks
+    if (role === 'pathology') {
+      rolesToSearch.push('bloodbank');
+    }
 
     const query = {
-      role,
+      role: { $in: rolesToSearch },
       status: "approved",
-      location: {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: [longitude, latitude],
-          },
-          $maxDistance: maxDistance,
-        },
-      },
     };
 
-    // Add role-specific availability filters
+    if (role === 'doctor') {
+      // Doctor: no geo/city filter — search all approved doctors
+      if (category) {
+        query.category = category;
+      }
+    } else {
+      // All non-doctor services: match by city (case-insensitive)
+      if (city && city.trim() !== '') {
+        query.city = { $regex: new RegExp(`^${city.trim()}$`, 'i') };
+      } else {
+        // Fallback: if no city provided, use geo-radius (20km)
+        const [longitude, latitude] = coordinates;
+        if (longitude !== 0 || latitude !== 0) {
+          query.location = {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: [longitude, latitude],
+              },
+              $maxDistance: 20000,
+            },
+          };
+        }
+      }
+    }
+
+    // Ambulance: must be marked as available
     if (role === "ambulance") {
       query.isAvailable = true;
     }
 
+    logger.info(`Finding providers: role=${role}, city=${city || 'N/A'}, state=${state || 'N/A'}`);
+
     const providers = await User.find(query)
-      .select("_id firstName lastName phone email deviceTokens location")
-      .limit(50)
+      .select("_id firstName lastName phone email deviceTokens location city state")
+      .limit(limit)
       .lean();
 
+    logger.info(`Found ${providers.length} providers for ${serviceType} in city: ${city || 'N/A'}`);
     return providers;
   } catch (error) {
     logger.error("Find available providers failed", { error: error.message });
@@ -116,13 +150,16 @@ const notifyAllProviders = async (booking, providers) => {
         viewed: false,
       });
 
+      const displayName = booking.patientName || `${booking.patient.firstName} ${booking.patient.lastName}`;
+
       // Send real-time socket notification
       socketHandler.emitToUser(provider._id.toString(), "new:booking:request", {
         bookingId: booking._id,
         serviceType: booking.serviceType,
-        patientName: `${booking.patient.firstName} ${booking.patient.lastName}`,
+        patientName: displayName,
         location: booking.location,
         requirements: booking.requirements,
+        nursingCares: booking.nursingCares,
         isEmergency: booking.isEmergency,
         createdAt: booking.createdAt,
         expiresAt: booking.expiresAt,
@@ -134,7 +171,7 @@ const notifyAllProviders = async (booking, providers) => {
         sender: booking.patient._id,
         type: "booking_request",
         title: booking.isEmergency ? "🚨 EMERGENCY Booking Request" : "New Booking Request",
-        message: `${booking.patient.firstName} needs ${booking.serviceType} service. ${booking.requirements.description.substring(0, 100)}`,
+        message: `${displayName} needs ${booking.serviceType} service. ${booking.requirements.description.substring(0, 100)}`,
         data: { 
           bookingId: booking._id,
           bookingType: "realtime",
@@ -149,6 +186,39 @@ const notifyAllProviders = async (booking, providers) => {
     await RealTimeBooking.findByIdAndUpdate(booking._id, {
       $set: { notifiedProviders },
     });
+
+    // Send service-specific bulk notifications
+    try {
+      if (booking.serviceType === 'nurse') {
+        const cares = booking.nursingCares?.map(c => c.name).join(', ') || booking.requirements.specialRequirements || 'Home nursing care';
+        await notificationService.sendNurseRequestToAllNurses(booking._id.toString(), {
+          serviceType: cares,
+          duration: booking.duration || 1,
+          totalAmount: booking.totalAmount || 500,
+          patientName: booking.patientName || `${booking.patient.firstName} ${booking.patient.lastName}`,
+        });
+      } else if (booking.serviceType === 'pathology') {
+        await notificationService.sendLabTestRequestToAllLabs(booking._id.toString(), {
+          testCount: booking.tests?.length || 1,
+          totalAmount: booking.totalAmount || 500,
+          patientName: `${booking.patient.firstName} ${booking.patient.lastName}`,
+          tests: booking.tests || [],
+        });
+      } else if (booking.serviceType === 'pharmacist') {
+        await notificationService.sendMedicineOrderToAllPharmacists(booking._id.toString(), {
+          itemCount: booking.medicines?.length || 1,
+          totalAmount: booking.totalAmount || booking.price || 0,
+          patientName: `${booking.patient.firstName} ${booking.patient.lastName}`,
+        });
+      }
+    } catch (bulkNotificationError) {
+      logger.error('Failed to send bulk notifications', { 
+        error: bulkNotificationError.message,
+        serviceType: booking.serviceType,
+        bookingId: booking._id,
+      });
+      // Don't throw - bulk notification failure shouldn't break the main flow
+    }
 
     logger.info(`Notified ${providers.length} providers for booking ${booking._id}`);
   } catch (error) {
@@ -172,9 +242,12 @@ const acceptBooking = async (bookingId, providerId) => {
     const booking = await RealTimeBooking.findOneAndUpdate(
       {
         _id: bookingId,
-        status: "pending", // Only accept if still pending
+        status: { $in: ["pending", "requested"] }, // Accept both pending and requested
         acceptedProvider: null, // Only if no provider has accepted yet
-        expiresAt: { $gt: new Date() }, // Ensure booking hasn't expired
+        $or: [
+          { expiresAt: { $exists: false } }, // Orders without expiration
+          { expiresAt: { $gt: new Date() } }, // Ensure booking hasn't expired
+        ],
       },
       {
         $set: {
@@ -190,15 +263,18 @@ const acceptBooking = async (bookingId, providerId) => {
       // Booking was already accepted by another provider or doesn't exist
       const existingBooking = await RealTimeBooking.findById(bookingId);
       if (!existingBooking) {
-        throw new Error("Booking not found");
+        const error = new Error("Booking not found");
+        error.status = 404;
+        throw error;
       }
       if (existingBooking.acceptedProvider) {
-        throw new Error("This booking has already been accepted by another provider");
+        const error = new Error("Order expired or already accepted by another provider");
+        error.status = 409;
+        throw error;
       }
-      if (existingBooking.expiresAt < new Date()) {
-        throw new Error("This booking has expired");
-      }
-      throw new Error("Unable to accept booking");
+      const error = new Error("Order expired");
+      error.status = 410;
+      throw error;
     }
 
     const socketHandler = getSocketHandler();
@@ -263,9 +339,16 @@ const updateBookingStatus = async (bookingId, providerId, newStatus) => {
 
     // Validate status transitions
     const validTransitions = {
-      accepted: ["on_the_way", "cancelled"],
-      on_the_way: ["in_progress", "cancelled"],
-      in_progress: ["completed", "cancelled"],
+      accepted: ["preparing", "ready", "on_the_way", "in_progress", "packing_medicines", "out_for_delivery", "sample_collected", "completed", "cancelled"],
+      preparing: ["ready", "on_the_way", "in_progress", "completed", "cancelled"],
+      packing_medicines: ["out_for_delivery", "on_the_way", "completed", "cancelled"],
+      ready: ["on_the_way", "in_progress", "completed", "cancelled"],
+      on_the_way: ["reached", "in_progress", "sample_collected", "completed", "cancelled"],
+      out_for_delivery: ["completed", "cancelled"],
+      reached: ["in_progress", "sample_collected", "completed", "cancelled"],
+      in_progress: ["on_the_way", "out_for_delivery", "sample_collected", "completed", "cancelled"],
+      sample_collected: ["report_uploaded", "completed", "cancelled"],
+      report_uploaded: ["completed", "cancelled"],
     };
 
     if (!validTransitions[booking.status]?.includes(newStatus)) {
@@ -304,7 +387,10 @@ const updateBookingStatus = async (bookingId, providerId, newStatus) => {
 
     // Notify patient of status change
     const statusMessages = {
+      preparing: "Your provider is preparing your order/service",
+      ready: "Your order/service is ready",
       on_the_way: "Your provider is on the way!",
+      reached: "Your provider has reached the location",
       in_progress: "Service has started",
       completed: "Service completed successfully",
       cancelled: "Booking has been cancelled",
@@ -395,6 +481,7 @@ const getBookingById = async (bookingId, userId) => {
     const booking = await RealTimeBooking.findById(bookingId)
       .populate("patient", "firstName lastName phone email")
       .populate("acceptedProvider", "firstName lastName phone email specialization")
+      .populate("offers.vendorId", "firstName lastName pharmacyName profilePic location averageRating totalRatings")
       .lean();
 
     if (!booking) {
@@ -433,6 +520,7 @@ const getPatientBookings = async (patientId, filters = {}) => {
     const [bookings, total] = await Promise.all([
       RealTimeBooking.find(query)
         .populate("acceptedProvider", "firstName lastName phone specialization")
+        .populate("medicines.medicineId")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -457,11 +545,22 @@ const getProviderBookings = async (providerId, filters = {}) => {
     const { status, page = 1, limit = 20 } = filters;
     
     // Get bookings where provider was notified OR accepted
+    // CRITICAL: Only show "requested" bookings that are NOT expired and NOT accepted by someone else
     const query = {
       $or: [
         { acceptedProvider: providerId },
-        { "notifiedProviders.provider": providerId, status: "pending" },
+        { 
+          "notifiedProviders.provider": providerId, 
+          status: { $in: ["pending", "requested"] },
+          acceptedProvider: null,
+          $or: [
+            { expiresAt: { $exists: false } },
+            { expiresAt: { $gt: new Date() } },
+          ],
+        },
       ],
+      // Always exclude cancelled and expired bookings from the list
+      status: { $nin: ["cancelled", "expired"] },
     };
 
     if (status) {
@@ -479,6 +578,12 @@ const getProviderBookings = async (providerId, filters = {}) => {
         .lean(),
       RealTimeBooking.countDocuments(query),
     ]);
+
+    bookings.forEach(b => {
+      if (b.offers && b.offers.some(o => o.vendorId && o.vendorId.toString() === providerId.toString())) {
+        b.hasOffered = true;
+      }
+    });
 
     return {
       bookings,
@@ -516,7 +621,7 @@ const expireOldBookings = async () => {
   try {
     const result = await RealTimeBooking.updateMany(
       {
-        status: "pending",
+        status: { $in: ["pending", "requested"] },
         expiresAt: { $lt: new Date() },
       },
       {
@@ -532,6 +637,69 @@ const expireOldBookings = async () => {
   }
 };
 
+const syncCart = async (patientId, serviceType, cartData) => {
+  let booking = await RealTimeBooking.findOne({
+    patient: patientId,
+    serviceType,
+    status: "in_cart",
+  });
+
+  if (booking) {
+    booking.medicines = cartData.medicines || booking.medicines;
+    booking.tests = cartData.tests || booking.tests;
+    booking.price = cartData.price || booking.price;
+    await booking.save();
+  } else {
+    booking = new RealTimeBooking({
+      patient: patientId,
+      serviceType,
+      status: "in_cart",
+      medicines: cartData.medicines,
+      tests: cartData.tests,
+      price: cartData.price,
+      title: "Shopping Cart",
+    });
+    await booking.save();
+  }
+  return booking.populate("patient");
+};
+
+const getCart = async (patientId, serviceType) => {
+  return await RealTimeBooking.findOne({
+    patient: patientId,
+    serviceType,
+    status: "in_cart",
+  }).populate("patient");
+};
+
+const checkoutCart = async (bookingId, checkoutData) => {
+  const booking = await RealTimeBooking.findById(bookingId).populate("patient");
+  if (!booking || booking.status !== "in_cart") {
+    throw { status: 400, message: "Cart not found or already checked out" };
+  }
+
+  // Update booking with checkout data (address, payment, etc)
+  Object.assign(booking, checkoutData);
+  booking.status = "requested";
+  await booking.save();
+
+  // Find nearby available providers
+  const providers = await findAvailableProviders(
+    booking.serviceType,
+    booking.location?.coordinates || [0, 0],
+    booking.isEmergency,
+    booking.category,
+    booking.city,
+    booking.state
+  );
+
+  if (providers.length > 0) {
+    await notifyAllProviders(booking, providers);
+  }
+
+  return booking;
+};
+
 export const realTimeBookingService = {
   createRealTimeBooking,
   acceptBooking,
@@ -542,4 +710,7 @@ export const realTimeBookingService = {
   getProviderBookings,
   markBookingAsViewed,
   expireOldBookings,
+  syncCart,
+  getCart,
+  checkoutCart,
 };

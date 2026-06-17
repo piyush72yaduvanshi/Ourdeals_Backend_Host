@@ -8,6 +8,7 @@ import { Booking } from '../models/Booking.model.js';
 import { Doctor } from '../models/Doctor.model.js';
 import { successResponse, errorResponse } from '../utils/response.util.js';
 import { logger } from '../utils/logger.util.js';
+import { getSocketHandler } from '../socket/socket.handler.js';
 
 /**
  * Create video room for consultation (Zoom)
@@ -18,13 +19,30 @@ const createVideoRoom = async (req, res) => {
     const userId = req.user.userId;
 
     // Verify booking exists and user is part of it
-    const booking = await Booking.findById(bookingId)
+    let booking = await Booking.findById(bookingId)
       .populate('patient', 'firstName lastName')
       .populate({
         path: 'provider',
         select: 'firstName lastName consultationTypes specialization role',
         model: 'User' // Explicitly specify the model
       });
+
+    let isRealTime = false;
+    if (!booking) {
+      const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+      booking = await RealTimeBooking.findById(bookingId)
+        .populate('patient', 'firstName lastName')
+        .populate({
+          path: 'acceptedProvider',
+          select: 'firstName lastName consultationTypes specialization role',
+          model: 'User'
+        });
+      if (booking) {
+        isRealTime = true;
+        // Map acceptedProvider to provider for compatibility with rest of the code
+        booking.provider = booking.acceptedProvider;
+      }
+    }
 
     if (!booking) {
       return res.status(404).json(errorResponse('Booking not found'));
@@ -38,74 +56,17 @@ const createVideoRoom = async (req, res) => {
       return res.status(403).json(errorResponse('Not authorized to access this consultation'));
     }
 
-    // Check if booking is for video consultation
-    // If doctor only supports video-call and booking is in-person, auto-convert it
-    if (booking.consultationType !== 'video-call') {
-      logger.info(`🔍 Debugging booking ${bookingId}:`);
-      logger.info(`  - Consultation type: ${booking.consultationType}`);
-      logger.info(`  - Provider ID: ${booking.provider._id}`);
-      logger.info(`  - Provider name: ${booking.provider.firstName} ${booking.provider.lastName}`);
-      logger.info(`  - Provider consultationTypes: ${JSON.stringify(booking.provider.consultationTypes)}`);
-      logger.info(`  - Provider consultationTypes type: ${typeof booking.provider.consultationTypes}`);
-      logger.info(`  - Provider consultationTypes length: ${booking.provider.consultationTypes?.length}`);
-      logger.info(`  - Full provider object: ${JSON.stringify(booking.provider, null, 2)}`);
-      
-      // Check if doctor supports video calls
-      let doctorSupportsVideo = booking.provider.consultationTypes && 
-                               Array.isArray(booking.provider.consultationTypes) &&
-                               booking.provider.consultationTypes.includes('video-call');
-      
-      // If consultationTypes is not populated, fetch doctor directly
-      if (!booking.provider.consultationTypes || booking.provider.consultationTypes.length === 0) {
-        logger.info(`🔄 consultationTypes not populated, fetching doctor directly...`);
-        try {
-          const doctor = await Doctor.findById(booking.provider._id);
-          if (doctor && doctor.consultationTypes) {
-            logger.info(`  - Direct doctor query consultationTypes: ${JSON.stringify(doctor.consultationTypes)}`);
-            doctorSupportsVideo = doctor.consultationTypes.includes('video-call');
-            // Update the booking provider object with consultationTypes for future use
-            booking.provider.consultationTypes = doctor.consultationTypes;
-          }
-        } catch (directQueryError) {
-          logger.error(`❌ Failed to fetch doctor directly: ${directQueryError.message}`);
-        }
-      }
-      
-      logger.info(`  - Doctor supports video: ${doctorSupportsVideo}`);
-      
-      if (doctorSupportsVideo && booking.consultationType === 'in-person') {
-        // Auto-convert in-person to video-call if doctor supports video
-        logger.info(`🔄 Auto-converting booking ${bookingId} from in-person to video-call`);
-        
-        try {
-          booking.consultationType = 'video-call';
-          booking.location = undefined; // Remove location for video calls
-          await booking.save();
-          logger.info(`✅ Booking ${bookingId} successfully converted to video-call`);
-        } catch (saveError) {
-          logger.error(`❌ Failed to save booking conversion: ${saveError.message}`);
-          return res.status(500).json(errorResponse('Failed to convert booking to video consultation'));
-        }
-      } else {
-        logger.error(`❌ Video room creation failed for booking ${bookingId}:`, {
-          consultationType: booking.consultationType,
-          doctorSupportsVideo,
-          doctorConsultationTypes: booking.provider.consultationTypes,
-          doctorId: booking.provider._id
-        });
-        
-        // Provide more specific error message
-        if (!doctorSupportsVideo) {
-          return res.status(400).json(errorResponse(`Doctor does not support video consultations. Supported types: ${booking.provider.consultationTypes?.join(', ') || 'none'}`));
-        } else {
-          return res.status(400).json(errorResponse('This booking is not for video consultation'));
-        }
-      }
+    // Skip consultationType validation/conversion as all doctors support video
+
+    // Check booking status - allow requested (auto-accept), accepted, and in_progress
+    if (!['requested', 'accepted', 'in_progress'].includes(booking.status)) {
+      return res.status(400).json(errorResponse('Consultation not ready. Status: ' + booking.status));
     }
 
-    // Check booking status
-    if (!['accepted', 'in_progress'].includes(booking.status)) {
-      return res.status(400).json(errorResponse('Consultation not ready. Status: ' + booking.status));
+    // Auto-accept if still in requested status
+    if (booking.status === 'requested') {
+      booking.status = 'accepted';
+      try { await booking.save(); } catch(e) { logger.warn('Could not auto-accept booking:', e.message); }
     }
 
     // Create or get existing Zoom meeting
@@ -141,6 +102,22 @@ const createVideoRoom = async (req, res) => {
     // Return appropriate token based on role
     const role = isProvider ? 'host' : 'participant';
     const token = isProvider ? session.hostToken || session.token : session.participantToken || session.token;
+
+    // If patient is joining, mark patient_on_call
+    if (isPatient && !booking.patient_on_call) {
+      booking.patient_on_call = true;
+      await booking.save();
+
+      // Emit WebSocket event for real-time tracking
+      try {
+        const socketHandler = getSocketHandler();
+        socketHandler.emitToBooking(bookingId, 'call:patient_joined', {
+          bookingId,
+          patient_on_call: true,
+          timestamp: new Date(),
+        });
+      } catch (e) { /* socket may not be initialized */ }
+    }
 
     logger.info(`Zoom meeting access granted for ${role}: ${userId} in booking: ${bookingId}`);
 
@@ -203,7 +180,15 @@ const getVideoToken = async (req, res) => {
     const userId = req.user.userId;
 
     // Verify booking
-    const booking = await Booking.findById(bookingId);
+    let booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+      booking = await RealTimeBooking.findById(bookingId);
+      if (booking) {
+        booking.provider = booking.acceptedProvider;
+      }
+    }
 
     if (!booking) {
       return res.status(404).json(errorResponse('Booking not found'));
@@ -247,7 +232,15 @@ const endVideoCall = async (req, res) => {
     const userId = req.user.userId;
 
     // Verify booking
-    const booking = await Booking.findById(bookingId);
+    let booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+      booking = await RealTimeBooking.findById(bookingId);
+      if (booking) {
+        booking.provider = booking.acceptedProvider;
+      }
+    }
 
     if (!booking) {
       return res.status(404).json(errorResponse('Booking not found'));
@@ -268,16 +261,34 @@ const endVideoCall = async (req, res) => {
       }
     }
 
-    // Update booking status
-    booking.status = 'completed';
-    booking.completedAt = new Date();
+    // Mark video call as completed and consultation as ended
+    const now = new Date();
+    booking.videoCallEndedAt = now;
+    booking.videoCallCompleted = true;
+    booking.doctor_on_call = false;
+    booking.patient_on_call = false;
+    booking.consultation_ended = true;
+    booking.consultation_ended_at = now;
     await booking.save();
+
+    // Emit WebSocket event for instant notification
+    try {
+      const socketHandler = getSocketHandler();
+      socketHandler.emitToBooking(bookingId, 'call:consultation_ended', {
+        bookingId,
+        consultation_ended: true,
+        consultation_ended_at: now,
+        status: booking.status,
+        timestamp: now,
+      });
+    } catch (e) { /* socket may not be initialized */ }
 
     logger.info(`Video consultation ended for booking: ${bookingId}`);
 
     res.json(successResponse('Video consultation ended', {
       bookingId,
-      status: 'completed',
+      status: booking.status,
+      videoCallCompleted: true,
     }));
   } catch (error) {
     logger.error('End video call error', { error: error.message });
@@ -294,7 +305,15 @@ const getRoomStatus = async (req, res) => {
     const userId = req.user.userId;
 
     // Verify booking
-    const booking = await Booking.findById(bookingId);
+    let booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+      booking = await RealTimeBooking.findById(bookingId);
+      if (booking) {
+        booking.provider = booking.acceptedProvider;
+      }
+    }
 
     if (!booking) {
       return res.status(404).json(errorResponse('Booking not found'));
@@ -406,9 +425,23 @@ const startVideoConsultation = async (req, res) => {
     const userId = req.user.userId;
 
     // Verify booking exists and user is the provider
-    const booking = await Booking.findById(bookingId)
+    let booking = await Booking.findById(bookingId)
       .populate('patient', 'firstName lastName')
       .populate('provider', 'firstName lastName role');
+
+    if (!booking) {
+      const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+      booking = await RealTimeBooking.findById(bookingId)
+        .populate('patient', 'firstName lastName')
+        .populate({
+          path: 'acceptedProvider',
+          select: 'firstName lastName role',
+          model: 'User'
+        });
+      if (booking) {
+        booking.provider = booking.acceptedProvider;
+      }
+    }
 
     if (!booking) {
       return res.status(404).json(errorResponse('Booking not found'));
@@ -421,15 +454,17 @@ const startVideoConsultation = async (req, res) => {
     }
 
     // Check if booking is ready for consultation
-    if (!['accepted', 'in_progress'].includes(booking.status)) {
+    if (!['requested', 'accepted', 'in_progress'].includes(booking.status)) {
       return res.status(400).json(errorResponse(`Cannot start consultation. Current status: ${booking.status}`));
     }
 
-    // Update booking status to in_progress and set start time
+    // Update booking status to in_progress, set start time, and mark doctor on call
     const now = new Date();
     booking.status = 'in_progress';
     booking.startTime = now;
     booking.meetingStartTime = now;
+    booking.doctor_on_call = true;
+    booking.consultation_ended = false;
 
     // If no end time is set, calculate it based on duration or default to 30 minutes
     if (!booking.endTime) {
@@ -438,6 +473,17 @@ const startVideoConsultation = async (req, res) => {
     }
 
     await booking.save();
+
+    // Emit WebSocket event for real-time tracking
+    try {
+      const socketHandler = getSocketHandler();
+      socketHandler.emitToBooking(bookingId, 'call:doctor_joined', {
+        bookingId,
+        doctor_on_call: true,
+        status: 'in_progress',
+        timestamp: now,
+      });
+    } catch (e) { /* socket may not be initialized */ }
 
     logger.info(`Video consultation started by provider ${userId} for booking ${bookingId}`, {
       bookingId,
@@ -504,9 +550,23 @@ const completeVideoConsultation = async (req, res) => {
     const userId = req.user.userId;
 
     // Verify booking exists and user is the provider
-    const booking = await Booking.findById(bookingId)
+    let booking = await Booking.findById(bookingId)
       .populate('patient', 'firstName lastName')
       .populate('provider', 'firstName lastName role');
+
+    if (!booking) {
+      const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+      booking = await RealTimeBooking.findById(bookingId)
+        .populate('patient', 'firstName lastName')
+        .populate({
+          path: 'acceptedProvider',
+          select: 'firstName lastName role',
+          model: 'User'
+        });
+      if (booking) {
+        booking.provider = booking.acceptedProvider;
+      }
+    }
 
     if (!booking) {
       return res.status(404).json(errorResponse('Booking not found'));
@@ -528,6 +588,11 @@ const completeVideoConsultation = async (req, res) => {
     booking.status = 'completed';
     booking.endTime = now;
     booking.meetingEndTime = now;
+    booking.doctor_on_call = false;
+    booking.patient_on_call = false;
+    booking.consultation_ended = true;
+    booking.consultation_ended_at = now;
+    booking.videoCallCompleted = true;
 
     // Calculate actual duration
     if (booking.startTime) {
@@ -535,6 +600,28 @@ const completeVideoConsultation = async (req, res) => {
     }
 
     await booking.save();
+
+    // Delete the Zoom meeting if it exists
+    if (booking.zoomMeetingId) {
+      try {
+        await zoomService.deleteMeeting(booking.zoomMeetingId);
+      } catch (error) {
+        logger.warn(`Failed to delete Zoom meeting on complete: ${error.message}`);
+      }
+    }
+
+    // Emit WebSocket event for instant notification to both parties
+    try {
+      const socketHandler = getSocketHandler();
+      socketHandler.emitToBooking(bookingId, 'call:consultation_ended', {
+        bookingId,
+        consultation_ended: true,
+        consultation_ended_at: now,
+        status: 'completed',
+        duration: booking.duration,
+        timestamp: now,
+      });
+    } catch (e) { /* socket may not be initialized */ }
 
     logger.info(`Video consultation completed by provider ${userId} for booking ${bookingId}`, {
       bookingId,
@@ -572,6 +659,47 @@ const completeVideoConsultation = async (req, res) => {
   }
 };
 
+/**
+ * Get real-time call status for a booking
+ * GET /video/call-status/:bookingId
+ */
+const getCallStatus = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const userId = req.user.userId;
+
+    // Verify booking
+    let booking = await Booking.findById(bookingId)
+      .select('doctor_on_call patient_on_call consultation_ended consultation_ended_at status videoCallCompleted');
+
+    if (!booking) {
+      const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+      booking = await RealTimeBooking.findById(bookingId)
+        .select('doctor_on_call patient_on_call consultation_ended consultation_ended_at status videoCallCompleted acceptedProvider patient');
+      if (booking) {
+        booking.provider = booking.acceptedProvider;
+      }
+    }
+
+    if (!booking) {
+      return res.status(404).json(errorResponse('Booking not found'));
+    }
+
+    res.json(successResponse('Call status fetched', {
+      bookingId,
+      doctor_on_call: booking.doctor_on_call || false,
+      patient_on_call: booking.patient_on_call || false,
+      consultation_ended: booking.consultation_ended || false,
+      consultation_ended_at: booking.consultation_ended_at,
+      status: booking.status,
+      videoCallCompleted: booking.videoCallCompleted || false,
+    }));
+  } catch (error) {
+    logger.error('Get call status error', { error: error.message });
+    res.status(500).json(errorResponse(error.message || 'Failed to get call status'));
+  }
+};
+
 export {
   createVideoRoom,
   getVideoToken,
@@ -581,4 +709,5 @@ export {
   handleRoomStatusWebhook,
   startVideoConsultation,
   completeVideoConsultation,
+  getCallStatus,
 };

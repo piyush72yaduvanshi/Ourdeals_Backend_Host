@@ -1,6 +1,5 @@
 import express from 'express';
 import {
-  createPrescription,
   getPrescription,
   getPatientPrescriptions,
   getDoctorPrescriptions,
@@ -12,13 +11,6 @@ import { authorize } from '../middleware/role.middleware.js';
 const router = express.Router();
 
 // Doctor routes
-router.post(
-  '/doctor/prescriptions',
-  authenticate,
-  authorize(['doctor']),
-  createPrescription
-);
-
 router.get(
   '/doctor/prescriptions',
   authenticate,

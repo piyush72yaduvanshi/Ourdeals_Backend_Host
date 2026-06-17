@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+  # Application Service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-development}
+    container_name: healthcare_app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=${PORT:-5000}
+      - MONGODB_URI=${MONGODB_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - JWT_RESET_SECRET=${JWT_RESET_SECRET}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SNS_SENDER_ID=${AWS_SNS_SENDER_ID}
+      - AWS_SNS_PLATFORM_APPLICATION_ARN=${AWS_SNS_PLATFORM_APPLICATION_ARN}
+      - AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME}
+      - AWS_SQS_QUEUE_NAME=${AWS_SQS_QUEUE_NAME}
+      - CORS_ORIGIN=${CORS_ORIGIN}
+      - MAX_SERVICE_RADIUS=${MAX_SERVICE_RADIUS:-10}
+      - VALIDATE_TOKEN_VERSION=${VALIDATE_TOKEN_VERSION:-true}
+    volumes:
+      # Development only - hot reload
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - healthcare_network
+
+  # MongoDB Service
+  mongodb:
+    image: mongo:7
+    container_name: mongodb_container
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-password}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-ourdeals_healthcare}
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - healthcare_network
+
+  # Redis Service
+  redis:
+    image: redis:7-alpine
+    container_name: redis_container
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - healthcare_network
+
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  healthcare_network:
+    driver: bridge

@@ -52,6 +52,22 @@ const DoctorSchema = new mongoose.Schema(
       trim: true,
     },
 
+    category: {
+      type: String,
+      enum: [
+        'General Physician',
+        'Dermatology',
+        'Gynecology',
+        'Mental Wellness',
+        'Sexology',
+        'Stomach & Digestion',
+        'Pediatrics',
+        'Orthodpedic',
+        'Internal Medicine'
+      ],
+      default: 'General Physician'
+    },
+
     qualifications: {
       type: [String],
       default: [],
@@ -72,8 +88,9 @@ const DoctorSchema = new mongoose.Schema(
     // Consultation types offered by doctor
     consultationTypes: {
       type: [String],
-      enum: ['video-call', 'in-person', 'phone-call'],
+      enum: ['video-call', 'audio-call'],
       required: true,
+      default: ['video-call'],
     },
 
     availability: {

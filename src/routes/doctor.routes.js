@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 
 import {
   updateProfile,
@@ -10,10 +10,14 @@ import {
   getDashboard,
   updateLocation,
   completeAppointment,
+  markVideoCallCompleted,
+  scheduleAppointment,
+  uploadPrescriptionFile,
 } from '../controller/doctor.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorizeDoctor } from '../middleware/role.middleware.js';
+import { uploadPrescription } from '../middleware/upload.middleware.js';
 import {
   validate,
   validateParams,
@@ -41,6 +45,17 @@ router.get('/appointments/:id', validateParams(idParamSchema), getAppointmentDet
 router.post('/appointments/:id/accept', validateParams(idParamSchema), acceptAppointment);
 
 router.post('/appointments/:id/complete', validateParams(idParamSchema), completeAppointment);
+
+router.post('/appointments/:id/video-completed', validateParams(idParamSchema), markVideoCallCompleted);
+
+router.post('/appointments/:id/schedule', validateParams(idParamSchema), scheduleAppointment);
+
+router.post(
+  '/appointments/:id/prescription-file',
+  validateParams(idParamSchema),
+  uploadPrescription,
+  uploadPrescriptionFile,
+);
 
 router.post('/prescriptions', createPrescription);
 

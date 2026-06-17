@@ -13,8 +13,7 @@ const initializeSQS = async () => {
     const { region, accessKeyId, secretAccessKey, sqsQueueName } = envConfig.aws;
 
     if (!region || !accessKeyId || !secretAccessKey || !sqsQueueName) {
-      logger.info("ℹ AWS SQS credentials not configured. Queue disabled.");
-      initialized = true; // Mark as initialized to prevent retry
+      logger.warn("AWS SQS credentials not configured. Queue disabled.");
       return;
     }
 
@@ -37,8 +36,7 @@ const initializeSQS = async () => {
     initialized = true;
     logger.info("🔥 AWS SQS initialized", { queueUrl });
   } catch (error) {
-    initialized = true; // Mark as initialized to prevent retry
-    logger.info("ℹ AWS SQS not available - running without queue", { error: error.message });
+    logger.error("AWS SQS init failed", { error: error.message });
   }
 };
 

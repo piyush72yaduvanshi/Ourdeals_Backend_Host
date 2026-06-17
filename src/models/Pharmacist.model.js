@@ -11,6 +11,23 @@ const PharmacistSchema = new mongoose.Schema(
       trim: true,
     },
 
+    pharmacistName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    pharmacistRegistrationNumber: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    servicesAvailable: {
+      type: [String],
+      required: true,
+    },
+
     licenseNumber: {
       type: String,
       required: true,

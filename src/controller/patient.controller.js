@@ -2,6 +2,8 @@ import { locationService } from '../services/location.service.js';
 import { bookingService } from '../services/booking.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { s3Service } from '../services/s3.service.js';
+import { realTimeBookingService } from '../services/realTimeBooking.service.js';
+import { RealTimeBooking } from '../models/RealTimeBooking.model.js';
 import { successResponse, errorResponse, paginatedResponse } from '../utils/response.util.js';
 import { ServiceType } from '../types/index.js';
 
@@ -542,6 +544,7 @@ const searchDoctors = async (req, res) => {
     const {
       search,
       specialization,
+      category, // ADDED: Filter by category (maps to specialization)
       minFee,
       maxFee,
       experience,
@@ -588,19 +591,32 @@ const searchDoctors = async (req, res) => {
     }
 
     const query = { status: 'approved', role: 'doctor' };
+    const andConditions = [];
 
     // Text search on name
     if (search) {
-      query.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { specialization: { $regex: search, $options: 'i' } },
-      ];
+      andConditions.push({
+        $or: [
+          { firstName: { $regex: search, $options: 'i' } },
+          { lastName: { $regex: search, $options: 'i' } },
+          { specialization: { $regex: search, $options: 'i' } },
+        ]
+      });
     }
 
-    // Filter by specialization
-    if (specialization) {
-      query.specialization = { $regex: specialization, $options: 'i' };
+    // Filter by specialization or category
+    if (specialization || category) {
+      const filterValue = specialization || category;
+      andConditions.push({
+        $or: [
+          { specialization: { $regex: filterValue, $options: 'i' } },
+          { category: { $regex: filterValue, $options: 'i' } }
+        ]
+      });
+    }
+    
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
     }
 
     // Filter by consultation fee range
@@ -693,6 +709,24 @@ const searchDoctors = async (req, res) => {
   } catch (error) {
     return res.status(500).json(
       errorResponse(error.message || 'Failed to search doctors')
+    );
+  }
+};
+
+const getDoctorById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { Doctor } = await import('../models/Doctor.model.js');
+    
+    const doctor = await Doctor.findById(id).select('-password');
+    if (!doctor) {
+      return res.status(404).json(errorResponse('Doctor not found'));
+    }
+    
+    return res.json(successResponse('Doctor details fetched successfully', doctor));
+  } catch (error) {
+    return res.status(500).json(
+      errorResponse(error.message || 'Failed to fetch doctor details')
     );
   }
 };
@@ -1538,6 +1572,146 @@ async function searchBloodBanksInternal(query, location) {
     .sort({ rating: -1 });
 }
 
+// Prescription endpoints
+const createPrescriptionOrder = async (req, res, next) => {
+  try {
+    const { 
+      location, 
+      patientName, 
+      patientPhone, 
+      requirements = "Prescription Medicine Order" 
+    } = req.body;
+
+    const prescriptionImages = [];
+    
+    // Process uploaded images
+    let uploadedImages = [];
+    if (Array.isArray(req.files)) {
+      uploadedImages = req.files.filter(f => f.fieldname === 'prescriptionImages');
+    } else if (req.files && req.files.prescriptionImages) {
+      uploadedImages = req.files.prescriptionImages;
+    }
+
+    if (uploadedImages.length > 0) {
+      // Use s3Service to upload multiple files
+      const urls = await s3Service.uploadMultipleFiles(uploadedImages, 'prescriptions', req.user.userId);
+      prescriptionImages.push(...urls);
+    } else if (req.body.prescriptionImages) {
+      // Allow fallback if they pass URLs
+      prescriptionImages.push(...(Array.isArray(req.body.prescriptionImages) ? req.body.prescriptionImages : [req.body.prescriptionImages]));
+    }
+
+    if (prescriptionImages.length === 0) {
+      return res.status(400).json(errorResponse("At least one prescription image is required"));
+    }
+
+    let parsedLocation = location;
+    if (typeof location === 'string') {
+      try {
+        parsedLocation = JSON.parse(location);
+      } catch (e) {
+        parsedLocation = { address: location, coordinates: [0, 0] };
+      }
+    } else if (!location) {
+      parsedLocation = { address: 'Address pending', coordinates: [0,0] };
+    }
+
+    const bookingData = {
+      patient: req.user.userId,
+      serviceType: "pharmacist",
+      status: "requested",
+      isPrescriptionBased: true,
+      prescriptionImages,
+      patientName: patientName || "Patient",
+      patientPhone: patientPhone || "",
+      location: parsedLocation,
+      requirements: {
+        description: typeof requirements === 'string' ? requirements : JSON.stringify(requirements)
+      }
+    };
+
+    const booking = await realTimeBookingService.createRealTimeBooking(bookingData);
+    
+    res.status(201).json(successResponse("Prescription order sent to nearby pharmacies", { booking }));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message || "Failed to create prescription order"));
+  }
+};
+
+const getPrescriptionOffers = async (req, res, next) => {
+  try {
+    const booking = await RealTimeBooking.findById(req.params.id)
+      .populate('offers.vendorId', 'firstName lastName pharmacyName profilePic location averageRating totalRatings');
+      
+    if (!booking) return res.status(404).json(errorResponse("Order not found"));
+    
+    // Generate signed urls for offers
+    for (const offer of booking.offers) {
+      if (offer.vendorId && offer.vendorId.profilePic) {
+        offer.vendorId.profilePicSigned = await s3Service.getSignedUrl(offer.vendorId.profilePic);
+      }
+    }
+    
+    res.status(200).json(successResponse("Offers retrieved", { offers: booking.offers }));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message || "Failed to fetch offers"));
+  }
+};
+
+const approvePrescriptionOffer = async (req, res, next) => {
+  try {
+    const { offerId, vendorId } = req.body;
+    
+    const booking = await RealTimeBooking.findById(req.params.id);
+    if (!booking) return res.status(404).json(errorResponse("Order not found"));
+    
+    // Find the accepted offer
+    const acceptedOffer = booking.offers.find(o => 
+      (offerId && o._id.toString() === offerId) || 
+      (vendorId && o.vendorId.toString() === vendorId)
+    );
+    
+    if (!acceptedOffer) {
+      return res.status(400).json(errorResponse("Offer not found"));
+    }
+
+    // Update statuses
+    booking.offers.forEach(o => {
+      o.status = (o._id.toString() === acceptedOffer._id.toString()) ? 'accepted' : 'rejected';
+    });
+    
+    booking.status = 'accepted';
+    booking.acceptedProvider = acceptedOffer.vendorId;
+    booking.price = acceptedOffer.amount;
+    booking.notes = (booking.notes ? booking.notes + " | " : "") + "Expected Delivery: " + acceptedOffer.deliveryTime;
+    
+    await booking.save();
+    
+    // Notify vendor
+    await notificationService.send({
+      recipient: acceptedOffer.vendorId,
+      sender: req.user.userId,
+      type: "booking_update",
+      title: "Prescription Order Accepted",
+      message: "The patient has approved your offer for the prescription order.",
+      data: { bookingId: booking._id },
+      sendPush: true,
+    });
+    
+    // Emit socket event to vendor
+    const { getSocketHandler } = await import('../socket/socket.handler.js');
+    const socketHandler = getSocketHandler();
+    socketHandler.emitToUser(acceptedOffer.vendorId.toString(), "booking:status_update", {
+      bookingId: booking._id,
+      status: "accepted"
+    });
+
+    res.status(200).json(successResponse("Offer approved successfully", { booking }));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message || "Failed to approve offer"));
+  }
+};
+
 export {
   getNearbyServices,
   createBooking,
@@ -1564,4 +1738,8 @@ export {
   getAmbulanceDetails,
   getNurseAvailability,
   getMedicineById,
+  getDoctorById,
+  createPrescriptionOrder,
+  getPrescriptionOffers,
+  approvePrescriptionOffer,
 };

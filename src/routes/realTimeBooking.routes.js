@@ -10,6 +10,9 @@ import {
   getProviderBookings,
   getProviderDashboard,
   markAsViewed,
+  syncCart,
+  getCart,
+  checkoutCart,
 } from "../controller/realTimeBooking.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import { authorize } from "../middleware/role.middleware.js";
@@ -36,6 +39,28 @@ router.get(
   authenticate,
   authorize("patient"),
   getPatientDashboard
+);
+
+// Cart routes
+router.post(
+  "/cart/sync",
+  authenticate,
+  authorize("patient"),
+  syncCart
+);
+
+router.get(
+  "/cart",
+  authenticate,
+  authorize("patient"),
+  getCart
+);
+
+router.post(
+  "/:bookingId/checkout",
+  authenticate,
+  authorize("patient"),
+  checkoutCart
 );
 
 // Provider routes

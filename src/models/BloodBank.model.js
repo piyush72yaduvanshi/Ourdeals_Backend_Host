@@ -55,6 +55,18 @@ const BloodBankSchema = new mongoose.Schema(
       trim: true,
     },
 
+    inchargeName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    servicesAvailable: {
+      type: [String],
+      required: true,
+      default: [],
+    },
+
     bloodStock: {
       type: [BloodStockSchema],
       default: [],

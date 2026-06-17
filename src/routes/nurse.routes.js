@@ -5,7 +5,9 @@ import {
   updateServices,
   setAvailability,
   getBookings,
+  getBookingDetails,
   acceptBooking,
+  rejectBooking,
   startVisit,
   completeVisit,
   getDashboard,
@@ -28,8 +30,10 @@ router.put('/services', updateServices);
 router.put('/availability', setAvailability);
 
 router.get('/bookings', validateQuery(bookingQuerySchema), getBookings);
+router.get('/bookings/:id', validateParams(idParamSchema), getBookingDetails);
 
 router.post('/bookings/:id/accept', validateParams(idParamSchema), acceptBooking);
+router.post('/bookings/:id/reject', validateParams(idParamSchema), rejectBooking);
 router.post('/bookings/:id/start', validateParams(idParamSchema), startVisit);
 router.post('/bookings/:id/vitals', validateParams(idParamSchema), captureVitals);
 router.get('/bookings/:id/vitals', validateParams(idParamSchema), getVitals);

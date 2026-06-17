@@ -10,13 +10,20 @@ const createBookingRequest = async (req, res) => {
     // Support both formats: nested requirements object or flat structure
     const requirements = req.body.requirements || {};
     
+    let title = req.body.title || req.body.requirements?.description || 'Service Request';
+    let description = requirements.description || req.body.description || req.body.title || 'Service Request';
+
+    if (req.body.serviceType === 'ambulance') {
+      title = 'Ambulance Booking Request';
+      description = `Pickup: ${req.body.address}, Drop-off: ${req.body.dropOffLocation || 'N/A'}`;
+    }
+
     const bookingData = {
       patient: patientId,
       serviceType: req.body.serviceType,
-      title: req.body.title || req.body.requirements?.description || 'Service Request',
+      title: title,
       requirements: {
-        description: requirements.description || req.body.description || req.body.title || 'Service Request',
-        urgency: requirements.urgency || req.body.urgency || "medium",
+        description: description,
         preferredTime: requirements.preferredTime || req.body.preferredTime,
         specialRequirements: requirements.specialRequirements || req.body.specialRequirements,
       },
@@ -24,14 +31,61 @@ const createBookingRequest = async (req, res) => {
         address: req.body.address || req.body.location?.address || '',
         coordinates: req.body.coordinates || req.body.location?.coordinates || [0, 0],
       },
+      destination: req.body.dropOffLocation || req.body.destination,
+      dropOffLocation: req.body.dropOffLocation,
+      patientName: req.body.name || req.body.patientName,
+      patientPhone: req.body.phone || req.body.patientPhone || req.body.contactNumber,
+      patientAge: req.body.age || req.body.patientAge,
+      patientGender: req.body.gender || req.body.patientGender,
+      hospitalName: req.body.hospitalName,
+      bloodGroup: req.body.bloodGroup,
+      unitsRequired: req.body.unitsRequired,
       isEmergency: req.body.isEmergency || false,
       notes: req.body.notes,
       totalAmount: req.body.totalAmount || 0,
+      city: req.body.city || '',
+      state: req.body.state || '',
     };
 
     // Validate required fields
     if (!bookingData.serviceType) {
       return res.status(400).json(errorResponse("Service type is required"));
+    }
+
+    if (bookingData.serviceType === 'ambulance') {
+      if (!bookingData.location.address) {
+        return res.status(400).json(errorResponse("Pickup location is required for ambulance booking"));
+      }
+      if (!bookingData.dropOffLocation) {
+        return res.status(400).json(errorResponse("Drop-off location is required for ambulance booking"));
+      }
+      if (!bookingData.patientName) {
+        return res.status(400).json(errorResponse("Contact Name is required for ambulance booking"));
+      }
+      if (!bookingData.patientPhone) {
+        return res.status(400).json(errorResponse("Phone number is required for ambulance booking"));
+      }
+      if (!bookingData.patientAge) {
+        return res.status(400).json(errorResponse("Patient Age is required for ambulance booking"));
+      }
+      if (!bookingData.patientGender) {
+        return res.status(400).json(errorResponse("Patient Gender is required for ambulance booking"));
+      }
+    }
+
+    if (bookingData.serviceType === 'doctor') {
+      if (!req.body.category) {
+        return res.status(400).json(errorResponse("Category is required for doctor booking"));
+      }
+      bookingData.category = req.body.category;
+      bookingData.patientName = req.body.name || 'Patient';
+      
+      if (!bookingData.requirements.description) {
+        bookingData.requirements.description = `Doctor Consultation - ${bookingData.category}`;
+      }
+      if (!bookingData.location.address) {
+        bookingData.location.address = 'Online Consultation';
+      }
     }
 
     // For pharmacist orders, medicines array is REQUIRED
@@ -84,6 +138,33 @@ const createBookingRequest = async (req, res) => {
       }, 0);
     }
 
+    // For lab test orders, tests array is REQUIRED
+    if (bookingData.serviceType === 'labtest') {
+      if (!req.body.tests || !Array.isArray(req.body.tests) || req.body.tests.length === 0) {
+        return res.status(400).json(errorResponse("At least one test must be selected for lab tests."));
+      }
+
+      bookingData.tests = req.body.tests;
+      bookingData.preferredDate = req.body.preferredDate;
+      
+      // Calculate total price based on selected tests
+      bookingData.price = req.body.tests.reduce((total, test) => total + (Number(test.price) || 0), 0);
+      bookingData.title = `Lab Test Booking - ${req.body.tests.length} tests`;
+    }
+
+    // For nurse orders, nursingCares array is REQUIRED
+    if (bookingData.serviceType === 'nurse') {
+      if (!req.body.nursingCares || !Array.isArray(req.body.nursingCares) || req.body.nursingCares.length === 0) {
+        return res.status(400).json(errorResponse("At least one nursing care must be selected."));
+      }
+      bookingData.nursingCares = req.body.nursingCares;
+      bookingData.preferredDate = req.body.preferredDate;
+      bookingData.title = `Nurse Booking - ${req.body.nursingCares.map(c => c.name).join(', ')}`;
+      if (req.body.preferredTime) {
+        bookingData.requirements.preferredTime = req.body.preferredTime;
+      }
+    }
+
     if (!bookingData.requirements.description) {
       return res.status(400).json(errorResponse("Description is required"));
     }
@@ -130,7 +211,7 @@ const acceptBookingRequest = async (req, res) => {
       )
     );
   } catch (error) {
-    const statusCode = error.message.includes("already been accepted") ? 409 : 500;
+    const statusCode = error.status || (error.message.includes("already been accepted") ? 409 : 500);
     res.status(statusCode).json(errorResponse(error.message || "Failed to accept booking"));
   }
 };
@@ -146,7 +227,7 @@ const updateStatus = async (req, res) => {
       return res.status(400).json(errorResponse("Status is required"));
     }
 
-    const validStatuses = ["on_the_way", "in_progress", "completed", "cancelled"];
+    const validStatuses = ["preparing", "ready", "on_the_way", "reached", "in_progress", "completed", "cancelled"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json(errorResponse("Invalid status"));
     }
@@ -206,6 +287,17 @@ const getMyBookings = async (req, res) => {
     const patientId = req.user.userId;
     const { status, page, limit } = req.query;
 
+    // Auto-expire requested bookings older than 24 hours
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await RealTimeBooking.updateMany(
+      {
+        patient: patientId,
+        status: { $in: ['pending', 'requested'] },
+        createdAt: { $lt: twentyFourHoursAgo }
+      },
+      { $set: { status: 'expired' } }
+    );
+
     const filters = {
       status,
       page: parseInt(page) || 1,
@@ -232,6 +324,17 @@ const getMyBookings = async (req, res) => {
 const getPatientDashboard = async (req, res) => {
   try {
     const patientId = req.user.userId;
+
+    // Auto-expire requested bookings older than 24 hours
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await RealTimeBooking.updateMany(
+      {
+        patient: patientId,
+        status: { $in: ['pending', 'requested'] },
+        createdAt: { $lt: twentyFourHoursAgo }
+      },
+      { $set: { status: 'expired' } }
+    );
 
     const [
       activeBookings,
@@ -285,6 +388,17 @@ const getProviderBookings = async (req, res) => {
     const providerId = req.user.userId;
     const { status, page, limit } = req.query;
 
+    // Auto-expire requested bookings older than 24 hours
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await RealTimeBooking.updateMany(
+      {
+        "notifiedProviders.provider": providerId,
+        status: { $in: ['pending', 'requested'] },
+        createdAt: { $lt: twentyFourHoursAgo }
+      },
+      { $set: { status: 'expired' } }
+    );
+
     const filters = {
       status,
       page: parseInt(page) || 1,
@@ -311,6 +425,17 @@ const getProviderBookings = async (req, res) => {
 const getProviderDashboard = async (req, res) => {
   try {
     const providerId = req.user.userId;
+
+    // Auto-expire requested bookings older than 24 hours
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await RealTimeBooking.updateMany(
+      {
+        "notifiedProviders.provider": providerId,
+        status: { $in: ['pending', 'requested'] },
+        createdAt: { $lt: twentyFourHoursAgo }
+      },
+      { $set: { status: 'expired' } }
+    );
 
     const [
       pendingRequests,
@@ -377,6 +502,91 @@ const markAsViewed = async (req, res) => {
   }
 };
 
+const syncCart = async (req, res) => {
+  try {
+    const patientId = req.user.userId;
+    const { serviceType, medicines, tests, price } = req.body;
+    
+    if (!serviceType) {
+      return res.status(400).json(errorResponse("serviceType is required"));
+    }
+    
+    // Resolve full medicine details with prices and names if only ID & quantity is passed
+    let fullMedicines = medicines;
+    if (medicines && Array.isArray(medicines) && serviceType === 'pharmacist') {
+      const { Medicine } = await import('../models/Medicine.model.js');
+      fullMedicines = await Promise.all(medicines.map(async (item) => {
+        if (!item.medicineId) return null;
+        if (item.name && item.price) return item; // Already resolved
+        const medicine = await Medicine.findById(item.medicineId);
+        if (!medicine) return null;
+        return {
+          medicineId: medicine._id,
+          name: medicine.name,
+          quantity: item.quantity || 1,
+          price: medicine.discountedPrice || medicine.price,
+        };
+      }));
+      fullMedicines = fullMedicines.filter(m => m !== null);
+    }
+    
+    let calculatedPrice = price;
+    if (!calculatedPrice && fullMedicines) {
+      calculatedPrice = fullMedicines.reduce((total, item) => total + (item.price * item.quantity), 0);
+    }
+
+    const cartData = { medicines: fullMedicines, tests, price: calculatedPrice };
+    const cart = await realTimeBookingService.syncCart(patientId, serviceType, cartData);
+    
+    res.json(successResponse("Cart synced successfully", cart));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message || "Failed to sync cart"));
+  }
+};
+
+const getCart = async (req, res) => {
+  try {
+    const patientId = req.user.userId;
+    const { serviceType } = req.query;
+    
+    if (!serviceType) {
+      return res.status(400).json(errorResponse("serviceType query param is required"));
+    }
+    
+    const cart = await realTimeBookingService.getCart(patientId, serviceType);
+    res.json(successResponse("Cart retrieved", cart || {}));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message || "Failed to get cart"));
+  }
+};
+
+const checkoutCart = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    
+    const checkoutData = {
+      location: {
+        address: req.body.address || req.body.location?.address || '',
+        coordinates: req.body.coordinates || req.body.location?.coordinates || [72.8777, 19.0760],
+      },
+      patientName: req.body.name || req.body.patientName,
+      patientPhone: req.body.phone || req.body.patientPhone || req.body.contactNumber,
+      paymentMethod: req.body.paymentMethod || 'COD',
+      notes: req.body.notes,
+    };
+    
+    if (!checkoutData.location.address) {
+      return res.status(400).json(errorResponse("Delivery address is required"));
+    }
+    
+    const booking = await realTimeBookingService.checkoutCart(bookingId, checkoutData);
+    res.json(successResponse("Checkout successful, order placed", booking));
+  } catch (error) {
+    const statusCode = error.status || 500;
+    res.status(statusCode).json(errorResponse(error.message || "Failed to checkout cart"));
+  }
+};
+
 export {
   createBookingRequest,
   acceptBookingRequest,
@@ -388,4 +598,7 @@ export {
   getProviderBookings,
   getProviderDashboard,
   markAsViewed,
+  syncCart,
+  getCart,
+  checkoutCart,
 };

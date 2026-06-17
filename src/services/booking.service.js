@@ -1,4 +1,4 @@
-﻿import { Booking } from '../models/Booking.model.js';
+import { Booking } from '../models/Booking.model.js';
 import { User } from '../models/User.model.js';
 import { Doctor } from '../models/Doctor.model.js';
 import { notificationService } from './notification.service.js';
@@ -212,14 +212,32 @@ const createBooking = async (bookingData) => {
 
 const getBooking = async (bookingId) => {
   try {
-    const booking = await Booking.findById(bookingId)
+    let booking = await Booking.findById(bookingId)
       .populate('provider', 'firstName lastName phone specialization')
       .populate('patient', 'firstName lastName phone')
       .populate('prescription')
       .lean();
 
     if (!booking) {
-      throw new Error('Booking not found');
+      try {
+        const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+        booking = await RealTimeBooking.findById(bookingId)
+          .populate('acceptedProvider', 'firstName lastName phone specialization role')
+          .populate('patient', 'firstName lastName phone')
+          .lean();
+        
+        if (booking) {
+          booking.provider = booking.acceptedProvider;
+        }
+      } catch (e) {
+        // ignore import error
+      }
+    }
+
+    if (!booking) {
+      const error = new Error('Booking not found');
+      error.statusCode = 404;
+      throw error;
     }
 
     if (booking.provider) {
@@ -243,24 +261,74 @@ const getUserBookings = async (userId, role, query = {}) => {
       ? { patient: userId }
       : { provider: userId };
 
+    const rtFilter = role === 'patient' 
+      ? { patient: userId }
+      : { 
+          $or: [
+            { acceptedProvider: userId },
+            { 
+              "notifiedProviders.provider": userId, 
+              status: { $in: ["pending", "requested"] },
+              acceptedProvider: null
+            }
+          ]
+        };
+
     // Only add status filter if it's not 'all'
-    if (status && status !== 'all') filter.status = status;
+    if (status && status !== 'all') { filter.status = status; rtFilter.status = status; }
     
     // Only add serviceType filter if it's not 'all'
-    if (serviceType && serviceType !== 'all') filter.serviceType = serviceType;
+    if (serviceType && serviceType !== 'all') { 
+      if (serviceType === 'pathology') {
+        filter.serviceType = { $in: ['pathology', 'labtest'] };
+        rtFilter.serviceType = { $in: ['pathology', 'labtest'] };
+      } else if (serviceType === 'bloodbank') {
+        filter.serviceType = { $in: ['bloodbank', 'pathology', 'labtest'] };
+        rtFilter.serviceType = { $in: ['bloodbank', 'pathology', 'labtest'] };
+      } else {
+        filter.serviceType = serviceType; 
+        rtFilter.serviceType = serviceType; 
+      }
+    }
 
-    const [bookings, total] = await Promise.all([
-      Booking.find(filter)
-        .populate('provider patient prescription')
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(parseInt(limit))
-        .lean(),
-      Booking.countDocuments(filter),
-    ]);
+    let RealTimeBooking;
+    try {
+      const rtModule = await import('../models/RealTimeBooking.model.js');
+      RealTimeBooking = rtModule.RealTimeBooking;
+    } catch (e) {}
+
+    const queries = [
+      Booking.find(filter).populate('provider patient prescription').lean()
+    ];
+    
+    if (RealTimeBooking) {
+      queries.push(RealTimeBooking.find(rtFilter).populate('acceptedProvider patient').lean());
+    }
+
+    const results = await Promise.all(queries);
+    
+    let allBookings = [...results[0]];
+    if (results.length > 1 && results[1]) {
+      const rtBookings = results[1].map(b => {
+        if (b.acceptedProvider) b.provider = b.acceptedProvider;
+        // Ensure serviceType is carried over clearly if needed
+        return b;
+      });
+      allBookings = [...allBookings, ...rtBookings];
+    }
+    
+    // Fix: Sort descending (newest first)
+    allBookings.sort((a, b) => {
+      const dateA = new Date(a.createdAt || 0);
+      const dateB = new Date(b.createdAt || 0);
+      return dateB.getTime() - dateA.getTime();
+    });
+    
+    const total = allBookings.length;
+    const paginatedBookings = allBookings.slice((page - 1) * limit, page * limit);
 
     // Format patient names in bookings list
-    const formattedBookings = bookings.map(booking => {
+    const formattedBookings = paginatedBookings.map(booking => {
       if (booking.patient) {
         booking.patient.fullName = `${booking.patient.firstName || ''} ${booking.patient.lastName || ''}`.trim();
       }
@@ -351,9 +419,15 @@ const acceptBooking = async (bookingId, providerId) => {
 
     // If it's a medicine order without provider, any pharmacist can accept
     // Otherwise, only the assigned provider can accept
-    const booking = await Booking.findOne({ _id: bookingId });
+    let booking = await Booking.findOne({ _id: bookingId });
     if (!booking) {
-      throw new Error('Booking not found');
+      // Try RealTimeBooking instead
+      try {
+        const { realTimeBookingService } = await import('./realTimeBooking.service.js');
+        return await realTimeBookingService.acceptBooking(bookingId, providerId);
+      } catch (rtError) {
+        throw new Error(rtError.message || 'Booking not found, expired, or already accepted');
+      }
     }
 
     if (booking.provider) {

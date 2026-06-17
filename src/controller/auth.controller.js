@@ -76,34 +76,8 @@ const register = async (req, res) => {
       documents,
     });
 
-    // Update file paths with actual user ID
-    if (profilePicture || Object.keys(documents).length > 0) {
-      const updateData = {};
-      
-      if (profilePicture) {
-        const newProfilePicture = await s3Service.uploadFile(
-          { path: profilePicture, originalname: 'profile.jpg', mimetype: 'image/jpeg' },
-          'profile-pictures',
-          user._id
-        );
-        updateData.profilePicture = newProfilePicture;
-      }
-
-      if (Object.keys(documents).length > 0) {
-        const newDocuments = {};
-        for (const [key, value] of Object.entries(documents)) {
-          if (value) {
-            newDocuments[key] = value.replace('temp-', user._id + '-');
-          }
-        }
-        updateData.documents = newDocuments;
-      }
-
-      if (Object.keys(updateData).length > 0) {
-        await User.findByIdAndUpdate(user._id, updateData);
-        Object.assign(user, updateData);
-      }
-    }
+    // The files are already safely stored in S3/locally under unique temporary folders.
+    // No need to rename them to user._id as it breaks S3 URLs and causes broken links.
 
     setRefreshToken(res, refreshToken, platform);
 

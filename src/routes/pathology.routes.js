@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 
 import {
   updateProfile,
@@ -6,6 +6,7 @@ import {
   getBookings,
   getBookingDetails,
   acceptBooking,
+  rejectBooking,
   scheduleSampleCollection,
   uploadReport as uploadReportController,
   getDashboard,
@@ -29,6 +30,7 @@ router.get('/bookings', validateQuery(bookingQuerySchema), getBookings);
 router.get('/bookings/:id', validateParams(idParamSchema), getBookingDetails);
 
 router.post('/bookings/:id/accept', validateParams(idParamSchema), acceptBooking);
+router.post('/bookings/:id/reject', validateParams(idParamSchema), rejectBooking);
 
 router.post(
   '/bookings/:id/schedule',

@@ -12,6 +12,7 @@ import {
   handleRoomStatusWebhook,
   startVideoConsultation,
   completeVideoConsultation,
+  getCallStatus,
 } from '../controller/video.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 
@@ -23,6 +24,7 @@ router.get('/token/:bookingId', authenticate, getVideoToken);
 router.post('/end/:bookingId', authenticate, endVideoCall);
 router.get('/status/:bookingId', authenticate, getRoomStatus);
 router.get('/service-status', authenticate, getServiceStatus);
+router.get('/call-status/:bookingId', authenticate, getCallStatus);
 
 // New consultation management routes
 router.post('/start-consultation', authenticate, startVideoConsultation);
@@ -32,3 +34,4 @@ router.post('/complete-consultation', authenticate, completeVideoConsultation);
 router.post('/webhook/room-status', handleRoomStatusWebhook);
 
 export default router;
+

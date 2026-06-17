@@ -28,6 +28,7 @@ const userSchema = new mongoose.Schema(
         "ambulance",
         "bloodbank",
         "pathology",
+        "labtest",
       ],
       required: true,
     },
@@ -41,11 +42,21 @@ const userSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    age: {
+      type: Number,
+    },
+    gender: {
+      type: String,
+      enum: ["Male", "Female", "Other"],
+    },
+    address: {
+      type: String,
+    },
     phone: {
       type: String,
       required: true,
-      trim: true,
-      match: [/^[6-9]\d{9}$/, "Invalid phone number"],
+      unique: true,
+      match: [/^\+?[1-9]\d{9,14}$/, "Invalid phone number"],
     },
     status: {
       type: String,
@@ -66,6 +77,7 @@ const userSchema = new mongoose.Schema(
       registration: String,  // Business registration
       insurance: String,     // Insurance certificate
       experience: String,    // Experience certificate
+      gstCertificate: String, // GST Certificate
     },
     location: {
       type: {
