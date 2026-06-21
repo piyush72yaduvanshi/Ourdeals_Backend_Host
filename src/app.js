@@ -112,7 +112,7 @@ app.use((req, res, next) => {
 
 // 5. Body Parsing with Error Handling
 app.use(express.json({ 
-  limit: "16kb",
+  limit: "50mb",
   verify: (req, res, buf, encoding) => {
     // Store raw body for error logging
     req.rawBody = buf.toString(encoding || 'utf8');
