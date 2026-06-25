@@ -48,7 +48,7 @@ export const envConfig = {
     accessSecret: process.env.JWT_ACCESS_SECRET,
     refreshSecret: process.env.JWT_REFRESH_SECRET,
     resetSecret: process.env.JWT_RESET_SECRET ?? process.env.JWT_SECRET ?? process.env.JWT_ACCESS_SECRET,
-    accessExpiry: process.env.JWT_EXPIRES_IN || '15m',
+    accessExpiry: process.env.JWT_EXPIRES_IN || '1d',
     refreshExpiry: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   },
   aws: {
