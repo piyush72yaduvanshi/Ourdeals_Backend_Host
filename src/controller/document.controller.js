@@ -75,7 +75,7 @@ const uploadDocuments = async (req, res) => {
     }
 
     const uploadedDocuments = {};
-    const folder = `${userRole}/${userId}`;
+    const folder = `documents/${userRole}`;
 
     // Upload each file to S3
     for (const [fieldName, files] of Object.entries(req.files)) {
@@ -83,7 +83,7 @@ const uploadDocuments = async (req, res) => {
       
       if (fileArray.length === 1) {
         // Single file
-        const result = await s3Service.uploadFile(fileArray[0], folder);
+        const result = await s3Service.uploadFile(fileArray[0], folder, userId);
         uploadedDocuments[fieldName] = {
           fileName: result.fileName,
           fileUrl: result.fileUrl,
@@ -94,7 +94,7 @@ const uploadDocuments = async (req, res) => {
         user.documents[fieldName] = uploadedDocuments[fieldName];
       } else {
         // Multiple files
-        const results = await s3Service.uploadMultipleFiles(fileArray, folder);
+        const results = await s3Service.uploadMultipleFiles(fileArray, folder, userId);
         uploadedDocuments[fieldName] = results.map(result => ({
           fileName: result.fileName,
           fileUrl: result.fileUrl,

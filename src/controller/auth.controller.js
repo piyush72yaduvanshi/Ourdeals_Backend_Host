@@ -42,26 +42,31 @@ const register = async (req, res) => {
     }
 
     // Handle file uploads
-    let profilePicture = '';
+    let profilePicture = null;
     let documents = {};
 
     try {
-      // Handle profile picture
+      // Handle profile picture - Upload to S3
       if (req.files && req.files.profilePicture && req.files.profilePicture[0]) {
-        profilePicture = await s3Service.uploadFile(
+        const result = await s3Service.uploadFile(
           req.files.profilePicture[0], 
           'profile-pictures', 
           'temp-' + Date.now()
         );
+        profilePicture = result.fileUrl; // Store S3 URL
       }
 
-      // Handle documents (for vendors/providers)
+      // Handle documents (for vendors/providers) - Upload to S3
       if (req.files) {
         const documentFiles = { ...req.files };
         delete documentFiles.profilePicture; // Remove profile picture from documents
         
         if (Object.keys(documentFiles).length > 0) {
-          documents = await s3Service.uploadDocuments(documentFiles, 'temp-' + Date.now());
+          documents = await s3Service.uploadDocuments(
+            documentFiles, 
+            'temp-' + Date.now(),
+            userData.role || 'vendor'
+          );
         }
       }
     } catch (uploadError) {
@@ -387,11 +392,12 @@ const updateProfile = async (req, res) => {
       }
       
       // Upload new profile picture to S3
-      updateData.profilePicture = await s3Service.uploadFile(
+      const result = await s3Service.uploadFile(
         req.file, 
         'profile-pictures', 
         userId
       );
+      updateData.profilePicture = result.fileUrl;
     }
 
     // Remove sensitive fields that shouldn't be updated via this endpoint

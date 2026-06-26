@@ -17,7 +17,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { authorizePathology } from '../middleware/role.middleware.js';
 import { validateParams, validateQuery } from '../middleware/validation.middleware.js';
 import { bookingQuerySchema, idParamSchema } from '../validators/schemas.js';
-import { uploadReport } from '../middleware/upload.middleware.js';
+import { uploadDocuments, handleUploadError } from '../middleware/s3Upload.middleware.js';
 
 const router = Router();
 
@@ -38,10 +38,12 @@ router.post(
   scheduleSampleCollection
 );
 
+// Upload pathology report - now using S3
 router.post(
   '/bookings/:id/report',
   validateParams(idParamSchema),
-  uploadReport,
+  uploadDocuments.single('report'),
+  handleUploadError,
   uploadReportController
 );
 

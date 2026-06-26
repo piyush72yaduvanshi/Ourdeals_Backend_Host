@@ -21,13 +21,14 @@ const USE_S3 = process.env.USE_S3 === 'true'; // Toggle between S3 and local sto
  * @param {Object} file - Multer file object
  * @param {String} folder - Folder name (e.g., 'profile-pictures', 'documents')
  * @param {String} userId - User ID for organizing files
- * @returns {String} - File URL (S3 URL or local path)
+ * @returns {Object} - Object with fileName, fileUrl, originalName
  */
 const uploadFile = async (file, folder, userId) => {
   try {
     if (USE_S3) {
       // Upload to S3
-      const key = `${folder}/${userId}/${Date.now()}-${file.originalname}`;
+      const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const key = `${folder}/${userId}/${Date.now()}-${sanitizedFilename}`;
       
       const command = new PutObjectCommand({
         Bucket: BUCKET_NAME,
@@ -40,7 +41,7 @@ const uploadFile = async (file, folder, userId) => {
       
       // Delete local temp file after successful upload
       try {
-        if (fs.existsSync(file.path)) {
+        if (file.path && fs.existsSync(file.path)) {
           fs.unlinkSync(file.path);
           logger.info('Temporary file deleted', { path: file.path });
         }
@@ -52,16 +53,26 @@ const uploadFile = async (file, folder, userId) => {
         // Don't throw error, file was uploaded successfully
       }
       
-      // Return S3 URL
+      // Return S3 URL with metadata
       const url = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
       
       logger.info('File uploaded to S3', { key, url });
-      return url;
+      
+      return {
+        fileName: key,
+        fileUrl: url,
+        originalName: file.originalname,
+      };
     } else {
       // Use local storage (already handled by multer)
-      const localPath = `/${file.fieldname}/${file.filename}`;
+      const localPath = `/uploads/${file.fieldname}/${file.filename}`;
       logger.info('File stored locally', { path: localPath });
-      return localPath;
+      
+      return {
+        fileName: file.filename,
+        fileUrl: localPath,
+        originalName: file.originalname,
+      };
     }
   } catch (error) {
     // Clean up temp file on error
@@ -87,18 +98,18 @@ const uploadFile = async (file, folder, userId) => {
  * @param {Array} files - Array of multer file objects
  * @param {String} folder - Folder name
  * @param {String} userId - User ID
- * @returns {Array} - Array of file URLs
+ * @returns {Array} - Array of objects with fileName, fileUrl, originalName
  */
 const uploadMultipleFiles = async (files, folder, userId) => {
-  const uploadedUrls = [];
+  const uploadedFiles = [];
   const failedFiles = [];
   
   try {
     // Upload files one by one to ensure proper cleanup
     for (const file of files) {
       try {
-        const url = await uploadFile(file, folder, userId);
-        uploadedUrls.push(url);
+        const result = await uploadFile(file, folder, userId);
+        uploadedFiles.push(result);
       } catch (error) {
         logger.error('Failed to upload file', { 
           filename: file.originalname, 
@@ -124,15 +135,15 @@ const uploadMultipleFiles = async (files, folder, userId) => {
     if (failedFiles.length > 0) {
       logger.warn('Some files failed to upload', { 
         failed: failedFiles, 
-        successful: uploadedUrls.length 
+        successful: uploadedFiles.length 
       });
     }
     
-    if (uploadedUrls.length === 0) {
+    if (uploadedFiles.length === 0) {
       throw new Error('All file uploads failed');
     }
     
-    return uploadedUrls;
+    return uploadedFiles;
   } catch (error) {
     logger.error('Multiple file upload failed', { error: error.message });
     throw new Error(`Failed to upload files: ${error.message}`);
@@ -208,16 +219,37 @@ const getSignedUrl = async (fileUrl, expiresIn = 3600) => {
  * Upload documents object (multiple document types)
  * @param {Object} files - Object with document types as keys
  * @param {String} userId - User ID
- * @returns {Object} - Object with document URLs
+ * @param {String} role - User role (doctor, nurse, pathology, etc.)
+ * @returns {Object} - Object with document metadata
  */
-const uploadDocuments = async (files, userId) => {
+const uploadDocuments = async (files, userId, role = 'vendor') => {
   try {
     const documents = {};
+    const folder = `documents/${role}/${userId}`;
     
     for (const [fieldName, fileArray] of Object.entries(files)) {
       if (Array.isArray(fileArray) && fileArray.length > 0) {
-        const file = fileArray[0]; // Take first file for each document type
-        documents[fieldName] = await uploadFile(file, 'documents', userId);
+        if (fileArray.length === 1) {
+          // Single file
+          const result = await uploadFile(fileArray[0], folder, userId);
+          documents[fieldName] = {
+            fileName: result.fileName,
+            fileUrl: result.fileUrl,
+            originalName: result.originalName,
+            uploadedAt: new Date(),
+            verified: false,
+          };
+        } else {
+          // Multiple files (like photos)
+          const results = await uploadMultipleFiles(fileArray, folder, userId);
+          documents[fieldName] = results.map(result => ({
+            fileName: result.fileName,
+            fileUrl: result.fileUrl,
+            originalName: result.originalName,
+            uploadedAt: new Date(),
+            verified: false,
+          }));
+        }
       }
     }
     

@@ -112,7 +112,7 @@ export const createBookingWithDocuments = async (req, res) => {
             : [req.files.medicalReports];
           
           for (const file of reports) {
-            const result = await s3Service.uploadFile(file, folder);
+            const result = await s3Service.uploadFile(file, folder, patientId);
             uploadedFiles.push(result.fileName); // Track for rollback
             uploadedDocuments.medicalReports.push({
               fileName: result.fileName,
@@ -132,7 +132,7 @@ export const createBookingWithDocuments = async (req, res) => {
             : [req.files.previousPrescriptions];
           
           for (const file of prescriptions) {
-            const result = await s3Service.uploadFile(file, folder);
+            const result = await s3Service.uploadFile(file, folder, patientId);
             uploadedFiles.push(result.fileName); // Track for rollback
             uploadedDocuments.previousPrescriptions.push({
               fileName: result.fileName,
@@ -152,7 +152,7 @@ export const createBookingWithDocuments = async (req, res) => {
             : [req.files.otherDocuments];
           
           for (const file of others) {
-            const result = await s3Service.uploadFile(file, folder);
+            const result = await s3Service.uploadFile(file, folder, patientId);
             uploadedFiles.push(result.fileName); // Track for rollback
             uploadedDocuments.otherDocuments.push({
               fileName: result.fileName,
@@ -261,7 +261,7 @@ export const addDocumentsToBooking = async (req, res) => {
         : [req.files.medicalReports];
       
       for (const file of reports) {
-        const result = await s3Service.uploadFile(file, folder);
+        const result = await s3Service.uploadFile(file, folder, patientId);
         uploadedDocuments.medicalReports.push({
           fileName: result.fileName,
           fileUrl: result.fileUrl,
@@ -280,7 +280,7 @@ export const addDocumentsToBooking = async (req, res) => {
         : [req.files.previousPrescriptions];
       
       for (const file of prescriptions) {
-        const result = await s3Service.uploadFile(file, folder);
+        const result = await s3Service.uploadFile(file, folder, patientId);
         uploadedDocuments.previousPrescriptions.push({
           fileName: result.fileName,
           fileUrl: result.fileUrl,
@@ -299,7 +299,7 @@ export const addDocumentsToBooking = async (req, res) => {
         : [req.files.otherDocuments];
       
       for (const file of others) {
-        const result = await s3Service.uploadFile(file, folder);
+        const result = await s3Service.uploadFile(file, folder, patientId);
         uploadedDocuments.otherDocuments.push({
           fileName: result.fileName,
           fileUrl: result.fileUrl,

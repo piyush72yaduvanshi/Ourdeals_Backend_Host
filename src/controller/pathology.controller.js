@@ -219,8 +219,6 @@ const uploadReport = async (req, res) => {
         originalname: req.file.originalname,
         mimetype: req.file.mimetype,
         size: req.file.size,
-        filename: req.file.filename,
-        path: req.file.path
       });
     }
 
@@ -255,8 +253,17 @@ const uploadReport = async (req, res) => {
 
     console.log('✅ Booking found, current status:', booking.status);
 
-    booking.report = `/uploads/report/${file.filename}`;
+    // Upload report to S3
+    const { s3Service } = await import('../services/s3.service.js');
+    const folder = `reports/pathology`;
+    const uploadResult = await s3Service.uploadFile(file, folder, pathologyId);
+
+    // Store S3 URL in booking
+    booking.report = uploadResult.fileUrl;
+    booking.reportFileName = uploadResult.fileName;
+    booking.reportOriginalName = uploadResult.originalName;
     booking.status = 'completed';
+    
     if (!isRealTime) {
       booking.reportUploadedAt = new Date();
     } else {
@@ -264,7 +271,7 @@ const uploadReport = async (req, res) => {
     }
     await booking.save();
 
-    console.log('✅ Report saved to booking:', booking.report);
+    console.log('✅ Report uploaded to S3:', uploadResult.fileUrl);
 
     await Pathology.findByIdAndUpdate(pathologyId, {
       $inc: { totalTests: 1 },
@@ -291,12 +298,14 @@ const uploadReport = async (req, res) => {
       socketHandler.emitToUser(booking.patient._id.toString(), 'report:ready', {
         bookingId: id,
         reportUrl: booking.report,
+        reportFileName: booking.reportOriginalName,
         timestamp: new Date(),
       });
 
       socketHandler.emitToBooking(id, 'report:ready', {
         bookingId: id,
         reportUrl: booking.report,
+        reportFileName: booking.reportOriginalName,
         timestamp: new Date(),
       });
       console.log('✅ Socket events emitted');
@@ -305,7 +314,10 @@ const uploadReport = async (req, res) => {
     }
 
     console.log('✅ Report upload completed successfully');
-    res.json(successResponse('Report uploaded successfully', booking));
+    res.json(successResponse('Report uploaded successfully', {
+      ...booking.toObject(),
+      reportDownloadUrl: uploadResult.fileUrl,
+    }));
   } catch (error) {
     console.error('❌ Upload report error:', error);
     res.status(500).json(errorResponse(error.message || 'Failed to upload report'));
