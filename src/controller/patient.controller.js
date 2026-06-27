@@ -1593,16 +1593,47 @@ const createPrescriptionOrder = async (req, res, next) => {
     }
 
     if (uploadedImages.length > 0) {
-      // Use s3Service to upload multiple files
-      const urls = await s3Service.uploadMultipleFiles(uploadedImages, 'prescriptions', req.user.userId);
-      prescriptionImages.push(...urls);
+      try {
+        // Use s3Service to upload multiple files
+        const uploadResults = await s3Service.uploadMultipleFiles(uploadedImages, 'prescriptions', req.user.userId);
+        
+        // Extract only fileUrl string from each result object
+        const urls = uploadResults.map(result => {
+          // Ensure we're getting a string, not an object
+          if (typeof result === 'string') {
+            return result;
+          }
+          if (result && typeof result === 'object' && result.fileUrl) {
+            return String(result.fileUrl);
+          }
+          console.warn('Unexpected result format:', result);
+          return null;
+        }).filter(url => url !== null);
+        
+        prescriptionImages.push(...urls);
+      } catch (uploadError) {
+        console.error('Prescription image upload error:', uploadError);
+        return res.status(500).json(errorResponse('Failed to upload prescription images: ' + uploadError.message));
+      }
     } else if (req.body.prescriptionImages) {
-      // Allow fallback if they pass URLs
-      prescriptionImages.push(...(Array.isArray(req.body.prescriptionImages) ? req.body.prescriptionImages : [req.body.prescriptionImages]));
+      // Allow fallback if they pass URLs as strings
+      const passedImages = Array.isArray(req.body.prescriptionImages) 
+        ? req.body.prescriptionImages 
+        : [req.body.prescriptionImages];
+      
+      // Ensure all are strings
+      const imageUrls = passedImages.map(img => String(img)).filter(img => img && img !== 'undefined');
+      prescriptionImages.push(...imageUrls);
     }
 
     if (prescriptionImages.length === 0) {
       return res.status(400).json(errorResponse("At least one prescription image is required"));
+    }
+    
+    // Final validation - ensure all items are strings
+    const validatedImages = prescriptionImages.filter(img => typeof img === 'string' && img.length > 0);
+    if (validatedImages.length === 0) {
+      return res.status(400).json(errorResponse("No valid prescription images found"));
     }
 
     let parsedLocation = location;
@@ -1621,7 +1652,7 @@ const createPrescriptionOrder = async (req, res, next) => {
       serviceType: "pharmacist",
       status: "requested",
       isPrescriptionBased: true,
-      prescriptionImages,
+      prescriptionImages: validatedImages, // Use validated images
       patientName: patientName || "Patient",
       patientPhone: patientPhone || "",
       location: parsedLocation,

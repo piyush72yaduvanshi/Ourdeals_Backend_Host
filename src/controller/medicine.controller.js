@@ -222,6 +222,29 @@ const addMedicine = async (req, res) => {
       pharmacist: req.user.userId, // Optional - can be null for general medicines
     };
 
+    // Handle image uploads
+    if (req.files && req.files.length > 0) {
+      try {
+        const { s3Service } = await import('../services/s3.service.js');
+        const imageUrls = await s3Service.uploadMultipleFiles(
+          req.files, 
+          'medicine-images', 
+          req.user.userId
+        );
+        
+        // Extract file URLs from upload results
+        medicineData.images = imageUrls.map(img => img.fileUrl);
+        
+        // Set first image as main imageUrl for backward compatibility
+        if (imageUrls.length > 0) {
+          medicineData.imageUrl = imageUrls[0].fileUrl;
+        }
+      } catch (uploadError) {
+        console.error('Image upload error:', uploadError);
+        return res.status(500).json(errorResponse('Failed to upload medicine images: ' + uploadError.message));
+      }
+    }
+
     const medicine = await Medicine.create(medicineData);
 
     res.status(201).json(successResponse('Medicine added successfully', medicine));
@@ -236,6 +259,43 @@ const updateMedicine = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+
+    // Handle new image uploads
+    if (req.files && req.files.length > 0) {
+      try {
+        const { s3Service } = await import('../services/s3.service.js');
+        const newImages = await s3Service.uploadMultipleFiles(
+          req.files, 
+          'medicine-images', 
+          req.user.userId
+        );
+        
+        // Get existing medicine to preserve old images if needed
+        const existingMedicine = await Medicine.findById(id);
+        if (!existingMedicine) {
+          return res.status(404).json(errorResponse('Medicine not found'));
+        }
+        
+        // Merge with existing images or replace based on replaceImages flag
+        const replaceImages = req.body.replaceImages === 'true';
+        if (replaceImages) {
+          updates.images = newImages.map(img => img.fileUrl);
+        } else {
+          // Append new images to existing ones (max 5 total)
+          const existingImages = existingMedicine.images || [];
+          const allImages = [...existingImages, ...newImages.map(img => img.fileUrl)];
+          updates.images = allImages.slice(0, 5); // Keep max 5 images
+        }
+        
+        // Update main imageUrl to first image
+        if (updates.images && updates.images.length > 0) {
+          updates.imageUrl = updates.images[0];
+        }
+      } catch (uploadError) {
+        console.error('Image upload error:', uploadError);
+        return res.status(500).json(errorResponse('Failed to upload medicine images: ' + uploadError.message));
+      }
+    }
 
     const medicine = await Medicine.findByIdAndUpdate(
       id,

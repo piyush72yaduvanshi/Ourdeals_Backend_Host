@@ -11,6 +11,7 @@ import {
 } from '../controller/medicine.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/role.middleware.js';
+import { uploadDocuments, handleUploadError } from '../middleware/s3Upload.middleware.js';
 
 const router = Router();
 
@@ -21,8 +22,22 @@ router.get('/:id', getMedicineById);
 router.post('/check-availability', checkAvailability);
 
 // Protected routes (admin/pharmacist only)
-router.post('/', authenticate, authorize(['admin', 'pharmacist']), addMedicine);
-router.put('/:id', authenticate, authorize(['admin', 'pharmacist']), updateMedicine);
+router.post(
+  '/', 
+  authenticate, 
+  authorize(['admin', 'pharmacist']), 
+  uploadDocuments.multiple('images', 5),
+  handleUploadError,
+  addMedicine
+);
+router.put(
+  '/:id', 
+  authenticate, 
+  authorize(['admin', 'pharmacist']), 
+  uploadDocuments.multiple('images', 5),
+  handleUploadError,
+  updateMedicine
+);
 router.delete('/:id', authenticate, authorize(['admin', 'pharmacist']), deleteMedicine);
 router.patch('/:id/stock', authenticate, authorize(['admin', 'pharmacist']), updateStock);
 
