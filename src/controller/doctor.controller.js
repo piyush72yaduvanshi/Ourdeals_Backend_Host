@@ -291,8 +291,20 @@ const uploadPrescriptionFile = async (req, res) => {
       return res.status(404).json(errorResponse('Booking not found'));
     }
 
+    // Handle both Booking (provider) and RealTimeBooking (acceptedProvider) models
     const providerId = bookingRecord.provider?.toString?.()
-      || bookingRecord.provider?._id?.toString?.();
+      || bookingRecord.provider?._id?.toString?.()
+      || bookingRecord.acceptedProvider?.toString?.()
+      || bookingRecord.acceptedProvider?._id?.toString?.();
+    
+    console.log('🔐 Authorization Check:', {
+      doctorId,
+      providerId,
+      bookingProvider: bookingRecord.provider,
+      bookingAcceptedProvider: bookingRecord.acceptedProvider,
+      match: providerId === doctorId
+    });
+
     if (!providerId || providerId !== doctorId) {
       return res.status(403).json(errorResponse('Not authorized to upload prescription for this booking'));
     }
@@ -325,10 +337,20 @@ const uploadPrescriptionFile = async (req, res) => {
         notes: notes || undefined,
       });
 
-      await Booking.findByIdAndUpdate(bookingId, {
-        prescription: prescription._id,
-        status: bookingRecord.status === 'accepted' ? 'in_progress' : bookingRecord.status,
-      });
+      // Update booking with prescription reference - handle both Booking and RealTimeBooking models
+      try {
+        await Booking.findByIdAndUpdate(bookingId, {
+          prescription: prescription._id,
+          status: bookingRecord.status === 'accepted' ? 'in_progress' : bookingRecord.status,
+        });
+      } catch (err) {
+        // If not found in Booking, try RealTimeBooking
+        const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+        await RealTimeBooking.findByIdAndUpdate(bookingId, {
+          prescription: prescription._id,
+          status: bookingRecord.status === 'accepted' ? 'in_progress' : bookingRecord.status,
+        });
+      }
     }
 
     logger.info('Prescription file uploaded', {
