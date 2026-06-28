@@ -421,17 +421,28 @@ const RealTimeBookingSchema = new mongoose.Schema(
 // Compound indexes for efficient queries
 RealTimeBookingSchema.index({ patient: 1, status: 1, createdAt: -1 });
 RealTimeBookingSchema.index({ acceptedProvider: 1, status: 1, createdAt: -1 });
-RealTimeBookingSchema.index({ status: 1, expiresAt: 1 });
+RealTimeBookingSchema.index({ status: 1, createdAt: 1 }); // For expiration queries
 RealTimeBookingSchema.index({ serviceType: 1, status: 1, createdAt: -1 });
 RealTimeBookingSchema.index({ "notifiedProviders.provider": 1, status: 1 });
 
-// FIXED: TTL index for automatic expiration of old bookings
-RealTimeBookingSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// NOTE: We do NOT use TTL index to auto-delete documents
+// Instead, we manually mark old pending/requested orders as 'expired' via status field
+// This preserves order history for users and vendors
 
-// Auto-expire bookings after 24 hours if not accepted
+// Middleware to set initial expiration tracking for pending orders
 RealTimeBookingSchema.pre("save", function () {
-  if (this.isNew && !this.expiresAt) {
-    this.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  // Track when pending orders were created (for manual expiration logic)
+  // We don't auto-delete - just track creation time
+  
+  // When order status changes from pending to accepted/in-progress, we keep the record
+  if (!this.isNew && this.isModified('status')) {
+    const activeStatuses = ['accepted', 'in_progress', 'completed', 'cancelled', 
+                           'preparing', 'ready', 'on_the_way', 'reached',
+                           'packing_medicines', 'out_for_delivery',
+                           'sample_collected', 'report_uploaded'];
+    
+    // Keep all orders in database - don't auto-delete anything
+    // Expiration is handled via status field, not document deletion
   }
 });
 

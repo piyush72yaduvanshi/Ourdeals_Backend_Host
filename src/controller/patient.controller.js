@@ -1656,10 +1656,19 @@ const createPrescriptionOrder = async (req, res, next) => {
       patientName: patientName || "Patient",
       patientPhone: patientPhone || "",
       location: parsedLocation,
+      city: req.body.city || '', // IMPORTANT: City for vendor matching
+      state: req.body.state || '', // IMPORTANT: State for vendor matching
       requirements: {
         description: typeof requirements === 'string' ? requirements : JSON.stringify(requirements)
       }
     };
+
+    console.log('📍 Prescription Order Created:', {
+      city: bookingData.city,
+      state: bookingData.state,
+      location: bookingData.location,
+      isPrescriptionBased: bookingData.isPrescriptionBased
+    });
 
     const booking = await realTimeBookingService.createRealTimeBooking(bookingData);
     

@@ -258,6 +258,13 @@ const getPendingOrders = async (req, res) => {
       return res.json(paginatedResponse('Pending orders fetched', [], 1, Number(limit), 0));
     }
 
+    console.log('🏥 Pharmacist Location:', {
+      pharmacistId,
+      city: pharmacist.city,
+      state: pharmacist.state,
+      status: pharmacist.status
+    });
+
     // Find pending/requested medicine orders filtered by pharmacist's city and state
     const query = {
       serviceType: 'pharmacist',
@@ -277,6 +284,8 @@ const getPendingOrders = async (req, res) => {
       query.state = { $regex: new RegExp(`^${pharmacist.state.trim()}$`, 'i') };
     }
 
+    console.log('🔍 Query for pending orders:', JSON.stringify(query, null, 2));
+
     const skip = (Number(page) - 1) * Number(limit);
 
     const [orders, total] = await Promise.all([
@@ -289,6 +298,18 @@ const getPendingOrders = async (req, res) => {
         .lean(),
       RealTimeBooking.countDocuments(query),
     ]);
+
+    console.log('📦 Found orders:', {
+      total,
+      ordersCount: orders.length,
+      sampleOrder: orders[0] ? {
+        id: orders[0]._id,
+        city: orders[0].city,
+        state: orders[0].state,
+        isPrescriptionBased: orders[0].isPrescriptionBased,
+        status: orders[0].status
+      } : 'No orders'
+    });
 
     // Transform orders to include flattened patient info and delivery address
     const { s3Service } = await import('../services/s3.service.js');

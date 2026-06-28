@@ -119,6 +119,16 @@ connectDatabase()
           console.error("Failed to expire old bookings", err);
         }
       }, 5 * 60 * 1000); // Run every 5 minutes
+
+      // Start order expiration job - expires ONLY pending/requested orders after 24 hours
+      // This changes status to 'expired' but does NOT delete documents
+      // Users and vendors can still see expired orders in their history
+      import("./utils/orderExpiration.util.js")
+        .then(({ startOrderExpirationJob }) => {
+          startOrderExpirationJob();
+          console.log("✅ Order expiration job started - pending orders expire after 24 hours");
+        })
+        .catch((err) => console.error("Failed to start order expiration job", err));
     });
   })
   .catch((err) => {
