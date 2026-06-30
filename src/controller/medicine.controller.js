@@ -217,10 +217,33 @@ const checkAvailability = async (req, res) => {
 // Admin/Pharmacist - Add medicine
 const addMedicine = async (req, res) => {
   try {
+    // Parse request body and remove any invalid fields
     const medicineData = {
       ...req.body,
       pharmacist: req.user.userId, // Optional - can be null for general medicines
     };
+
+    // Remove imageUrl and images from request body if they exist as objects
+    // These will be set from uploaded files
+    if (typeof medicineData.imageUrl === 'object') {
+      delete medicineData.imageUrl;
+    }
+    if (medicineData.images && typeof medicineData.images === 'object' && !Array.isArray(medicineData.images)) {
+      delete medicineData.images;
+    }
+    
+    // Parse numeric fields that might come as strings from form-data
+    if (medicineData.price) medicineData.price = Number(medicineData.price);
+    if (medicineData.discountedPrice) medicineData.discountedPrice = Number(medicineData.discountedPrice);
+    if (medicineData.stock) medicineData.stock = Number(medicineData.stock);
+    
+    // Parse boolean fields
+    if (medicineData.requiresPrescription !== undefined) {
+      medicineData.requiresPrescription = medicineData.requiresPrescription === 'true' || medicineData.requiresPrescription === true;
+    }
+    if (medicineData.isActive !== undefined) {
+      medicineData.isActive = medicineData.isActive === 'true' || medicineData.isActive === true;
+    }
 
     // Handle image uploads
     if (req.files && req.files.length > 0) {
@@ -258,7 +281,16 @@ const addMedicine = async (req, res) => {
 const updateMedicine = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const updates = { ...req.body };
+
+    // Remove imageUrl and images from request body if they exist as objects
+    // These will be set from uploaded files
+    if (typeof updates.imageUrl === 'object') {
+      delete updates.imageUrl;
+    }
+    if (updates.images && typeof updates.images === 'object' && !Array.isArray(updates.images)) {
+      delete updates.images;
+    }
 
     // Handle new image uploads
     if (req.files && req.files.length > 0) {

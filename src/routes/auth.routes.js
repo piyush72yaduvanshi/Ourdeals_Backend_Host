@@ -18,24 +18,17 @@ router.post(
 
 router.post("/login", authLimiter, validate(loginSchema), authController.login);
 
-router.post("/logout", authController.logout);
-
-router.post("/logout-all", authenticate, authController.logoutAllDevices);
-
-router.post("/refresh", authController.refreshToken);
+router.post("/logout", authController.logout)
 
 router.get("/me", authenticate, authController.getCurrentUser);
 
+router.post("/logout-all", authenticate, authController.logoutAllDevices);
+router.post("/refresh", authController.refreshToken);
 router.post("/change-password", authenticate, authController.changePassword);
-
 router.post("/forgot-password", authLimiter, authController.forgotPassword);
-
 router.post("/reset-password", authLimiter, authController.resetPassword);
-
 router.post("/device-token", authenticate, authController.updateDeviceToken);
-
 router.put("/profile", authenticate, uploadProfilePicture, authController.updateProfile);
-
 router.delete("/profile/picture", authenticate, authController.deleteProfilePicture);
 
 export default router;

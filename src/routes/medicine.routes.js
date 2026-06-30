@@ -15,13 +15,11 @@ import { uploadDocuments, handleUploadError } from '../middleware/s3Upload.middl
 
 const router = Router();
 
-// Public routes (no authentication required)
 router.get('/', getAllMedicines);
 router.get('/categories', getCategories);
 router.get('/:id', getMedicineById);
 router.post('/check-availability', checkAvailability);
 
-// Protected routes (admin/pharmacist only)
 router.post(
   '/', 
   authenticate, 

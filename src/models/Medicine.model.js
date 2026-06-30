@@ -84,6 +84,13 @@ const medicineSchema = new mongoose.Schema(
     imageUrl: {
       type: String,
       trim: true,
+      validate: {
+        validator: function(v) {
+          // Allow empty string or valid string, not objects
+          return v === null || v === undefined || typeof v === 'string';
+        },
+        message: 'imageUrl must be a string'
+      }
     },
 
     // Support multiple images (1-5)
