@@ -255,12 +255,21 @@ const addMedicine = async (req, res) => {
           req.user.userId
         );
         
-        // Extract file URLs from upload results
-        medicineData.images = imageUrls.map(img => img.fileUrl);
+        // Extract file URLs from upload results - handle multiple formats
+        medicineData.images = imageUrls.map(img => {
+          // Handle if img is already a string
+          if (typeof img === 'string') return img;
+          // Handle object with fileUrl property
+          if (img && img.fileUrl) return img.fileUrl;
+          // Handle object with url property
+          if (img && img.url) return img.url;
+          // Fallback
+          return String(img);
+        });
         
         // Set first image as main imageUrl for backward compatibility
-        if (imageUrls.length > 0) {
-          medicineData.imageUrl = imageUrls[0].fileUrl;
+        if (medicineData.images.length > 0) {
+          medicineData.imageUrl = medicineData.images[0];
         }
       } catch (uploadError) {
         console.error('Image upload error:', uploadError);
@@ -308,14 +317,22 @@ const updateMedicine = async (req, res) => {
           return res.status(404).json(errorResponse('Medicine not found'));
         }
         
+        // Extract URLs from upload results - handle multiple formats
+        const newImageUrls = newImages.map(img => {
+          if (typeof img === 'string') return img;
+          if (img && img.fileUrl) return img.fileUrl;
+          if (img && img.url) return img.url;
+          return String(img);
+        });
+        
         // Merge with existing images or replace based on replaceImages flag
         const replaceImages = req.body.replaceImages === 'true';
         if (replaceImages) {
-          updates.images = newImages.map(img => img.fileUrl);
+          updates.images = newImageUrls;
         } else {
           // Append new images to existing ones (max 5 total)
           const existingImages = existingMedicine.images || [];
-          const allImages = [...existingImages, ...newImages.map(img => img.fileUrl)];
+          const allImages = [...existingImages, ...newImageUrls];
           updates.images = allImages.slice(0, 5); // Keep max 5 images
         }
         
