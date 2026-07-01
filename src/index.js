@@ -77,7 +77,6 @@ connectDatabase()
       .catch((err) => console.error("Failed to init Push Notifications", err));
 
     // Initialize AWS SQS Queue
-    // Initialize AWS SQS Queue
     import("./queue/notification.queue.js")
       .then(({ initializeSQS }) => {
         initializeSQS();
