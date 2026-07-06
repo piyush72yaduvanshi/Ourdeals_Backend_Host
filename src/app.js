@@ -223,6 +223,7 @@ app.use("/api/v1/bloodbank", bloodbankRouter);
 app.use("/api/v1/pathology", pathologyRouter);
 app.use("/api/v1/realtime", realTimeBookingRouter);
 app.use("/api/v1/realTimeBooking", realTimeBookingRouter); // Alias for frontend backward compatibility
+app.use("/api/v1/realtime-bookings", realTimeBookingRouter); // Alias for dash-case compatibility
 app.use("/api/v1/documents", documentRouter);
 app.use("/api/v1/payments", paymentRouter);
 app.use("/api/v1/bookings", bookingRouter);

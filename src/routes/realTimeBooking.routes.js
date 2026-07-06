@@ -13,6 +13,9 @@ import {
   syncCart,
   getCart,
   checkoutCart,
+  submitOfferForBooking,
+  approveBookingOffer,
+  rejectBookingOffer,
 } from "../controller/realTimeBooking.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import { authorize } from "../middleware/role.middleware.js";
@@ -97,6 +100,25 @@ router.patch(
   authenticate,
   authorize("doctor", "nurse", "ambulance", "pharmacist", "bloodbank", "pathology"),
   markAsViewed
+);
+
+router.post(
+  "/:bookingId/offer",
+  authenticate,
+  authorize("doctor", "nurse", "ambulance", "pharmacist", "bloodbank", "pathology", "labtest"),
+  submitOfferForBooking
+);
+
+router.post(
+  "/:bookingId/approve-offer",
+  authenticate,
+  approveBookingOffer
+);
+
+router.post(
+  "/:bookingId/reject-offer",
+  authenticate,
+  rejectBookingOffer
 );
 
 // Common routes (both patient and provider)

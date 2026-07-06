@@ -466,6 +466,15 @@ const cancelBooking = async (bookingId, userId, reason) => {
         reason,
         cancelledBy: isPatient ? "patient" : "provider",
       });
+    } else if (isPatient && booking.notifiedProviders && booking.notifiedProviders.length > 0) {
+      // If cancelled before anyone accepted, notify all notified providers
+      booking.notifiedProviders.forEach(np => {
+        socketHandler.emitToUser(np.provider.toString(), "booking:cancelled", {
+          bookingId: booking._id,
+          reason,
+          cancelledBy: "patient",
+        });
+      });
     }
 
     logger.info(`Booking ${bookingId} cancelled by ${userId}`);
@@ -480,8 +489,8 @@ const getBookingById = async (bookingId, userId) => {
   try {
     const booking = await RealTimeBooking.findById(bookingId)
       .populate("patient", "firstName lastName phone email")
-      .populate("acceptedProvider", "firstName lastName phone email specialization")
-      .populate("offers.vendorId", "firstName lastName pharmacyName profilePic location averageRating totalRatings")
+      .populate("acceptedProvider", "firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role")
+      .populate("offers.vendorId", "firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role averageRating totalRatings")
       .lean();
 
     if (!booking) {

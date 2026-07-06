@@ -187,6 +187,10 @@ const RealTimeBookingSchema = new mongoose.Schema(
         enum: ["pending", "accepted", "rejected"],
         default: "pending",
       },
+      note: {
+        type: String,
+        trim: true,
+      },
       createdAt: {
         type: Date,
         default: Date.now,

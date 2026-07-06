@@ -587,6 +587,188 @@ const checkoutCart = async (req, res) => {
   }
 };
 
+const submitOfferForBooking = async (req, res) => {
+  try {
+    const vendorId = req.user.userId;
+    const { bookingId } = req.params;
+    const { amount, deliveryTime, note } = req.body;
+
+    if (!amount) {
+      return res.status(400).json(errorResponse('Amount is required'));
+    }
+
+    const booking = await RealTimeBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json(errorResponse('Booking request not found'));
+    }
+
+    if (booking.status !== 'requested' && booking.status !== 'pending') {
+      return res.status(400).json(errorResponse('Booking is no longer accepting offers'));
+    }
+
+    // Check if offer already submitted by this vendor
+    const existingOffer = booking.offers?.find(o => o.vendorId.toString() === vendorId.toString());
+    if (existingOffer) {
+      return res.status(400).json(errorResponse('You have already submitted an offer for this request'));
+    }
+
+    const newOffer = {
+      vendorId,
+      amount: Number(amount),
+      deliveryTime: deliveryTime || 'Standard',
+      note: note || '',
+      status: 'pending',
+      createdAt: new Date()
+    };
+
+    if (!booking.offers) {
+      booking.offers = [];
+    }
+
+    booking.offers.push(newOffer);
+    await booking.save();
+
+    // Notify patient
+    const { notificationService } = await import('../services/notification.service.js');
+    const { getSocketHandler } = await import('../socket/socket.handler.js');
+
+    await notificationService.send({
+      recipient: booking.patient,
+      sender: vendorId,
+      type: "booking_update",
+      title: `New Offer for ${booking.serviceType}`,
+      message: `A provider has submitted an offer of ₹${amount} for your booking request.`,
+      data: { bookingId: booking._id },
+      sendPush: true,
+    });
+
+    try {
+      const socketHandler = getSocketHandler();
+      socketHandler.emitToUser(booking.patient.toString(), "booking:new_offer", {
+        bookingId: booking._id,
+        offer: newOffer
+      });
+    } catch (_) {}
+
+    res.json(successResponse('Offer submitted successfully.', newOffer));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message || 'Failed to submit offer'));
+  }
+};
+
+const approveBookingOffer = async (req, res) => {
+  try {
+    const patientId = req.user.userId;
+    const { bookingId } = req.params;
+    const { offerId, vendorId } = req.body;
+
+    const booking = await RealTimeBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json(errorResponse('Booking request not found'));
+    }
+
+    if (booking.patient.toString() !== patientId.toString()) {
+      return res.status(403).json(errorResponse('You are not authorized to approve offers for this booking'));
+    }
+
+    if (booking.status !== 'requested') {
+      return res.status(400).json(errorResponse(`Booking is already ${booking.status}`));
+    }
+
+    // Find the offer
+    let targetOffer;
+    if (offerId) {
+      targetOffer = booking.offers.find(o => o._id.toString() === offerId.toString());
+    } else if (vendorId) {
+      targetOffer = booking.offers.find(o => o.vendorId.toString() === vendorId.toString());
+    }
+
+    if (!targetOffer) {
+      return res.status(404).json(errorResponse('Offer not found'));
+    }
+
+    // Update the offer status
+    targetOffer.status = 'accepted';
+
+    // Reject all other offers
+    booking.offers.forEach(o => {
+      if (o._id.toString() !== targetOffer._id.toString()) {
+        o.status = 'rejected';
+      }
+    });
+
+    // Update booking status and acceptedProvider
+    booking.status = 'accepted';
+    booking.acceptedProvider = targetOffer.vendorId;
+    booking.totalAmount = targetOffer.amount;
+    booking.price = targetOffer.amount; // Ensure sync
+
+    await booking.save();
+
+    // Notify accepted vendor
+    const { notificationService } = await import('../services/notification.service.js');
+    const { getSocketHandler } = await import('../socket/socket.handler.js');
+
+    await notificationService.send({
+      recipient: targetOffer.vendorId,
+      sender: patientId,
+      type: "booking_update",
+      title: "Offer Approved",
+      message: `The patient has approved your offer of ₹${targetOffer.amount}.`,
+      data: { bookingId: booking._id },
+      sendPush: true,
+    });
+
+    try {
+      const socketHandler = getSocketHandler();
+      socketHandler.emitToUser(targetOffer.vendorId.toString(), "booking:offer_approved", {
+        bookingId: booking._id,
+        offerId: targetOffer._id
+      });
+    } catch (_) {}
+
+    res.json(successResponse('Offer approved successfully.', booking));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message || 'Failed to approve offer'));
+  }
+};
+
+const rejectBookingOffer = async (req, res) => {
+  try {
+    const patientId = req.user.userId;
+    const { bookingId } = req.params;
+    const { offerId, vendorId } = req.body;
+
+    const booking = await RealTimeBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json(errorResponse('Booking request not found'));
+    }
+
+    if (booking.patient.toString() !== patientId.toString()) {
+      return res.status(403).json(errorResponse('You are not authorized to modify this booking'));
+    }
+
+    // Find the offer
+    let targetOffer;
+    if (offerId) {
+      targetOffer = booking.offers.find(o => o._id.toString() === offerId.toString());
+    } else if (vendorId) {
+      targetOffer = booking.offers.find(o => o.vendorId.toString() === vendorId.toString());
+    }
+
+    if (!targetOffer) {
+      return res.status(404).json(errorResponse('Offer not found'));
+    }
+
+    targetOffer.status = 'rejected';
+    await booking.save();
+
+    res.json(successResponse('Offer rejected successfully.', booking));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message || 'Failed to reject offer'));
+  }
+};
+
 export {
   createBookingRequest,
   acceptBookingRequest,
@@ -601,4 +783,7 @@ export {
   syncCart,
   getCart,
   checkoutCart,
+  submitOfferForBooking,
+  approveBookingOffer,
+  rejectBookingOffer,
 };

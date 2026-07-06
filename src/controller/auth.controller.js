@@ -41,6 +41,20 @@ const register = async (req, res) => {
       return res.status(400).json(errorResponse(validation.message));
     }
 
+    // Check if user already exists BEFORE performing expensive file uploads
+    if (userData.email) {
+      const existingEmail = await User.findOne({ email: userData.email.toLowerCase() });
+      if (existingEmail) {
+        return res.status(400).json(errorResponse('Email is already registered'));
+      }
+    }
+    if (userData.phone) {
+      const existingPhone = await User.findOne({ phone: userData.phone });
+      if (existingPhone) {
+        return res.status(400).json(errorResponse('Phone number is already registered'));
+      }
+    }
+
     // Handle file uploads
     let profilePicture = null;
     let documents = {};

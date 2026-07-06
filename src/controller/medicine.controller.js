@@ -1,5 +1,6 @@
 import { Medicine } from '../models/Medicine.model.js';
 import { successResponse, errorResponse, paginatedResponse } from '../utils/response.util.js';
+import { s3Service } from '../services/s3.service.js';
 
 // Public API - Get all medicines (for users to browse)
 const getAllMedicines = async (req, res) => {
@@ -71,13 +72,27 @@ const getAllMedicines = async (req, res) => {
       Medicine.countDocuments(query),
     ]);
 
-    // Calculate discount percentage for each medicine
-    const medicinesWithDiscount = medicines.map(medicine => ({
-      ...medicine,
-      discountPercentage: medicine.discountedPrice 
-        ? Math.round(((medicine.price - medicine.discountedPrice) / medicine.price) * 100)
-        : 0,
-      finalPrice: medicine.discountedPrice || medicine.price,
+    // Calculate discount percentage for each medicine and generate signed URLs
+    const medicinesWithDiscount = await Promise.all(medicines.map(async (medicine) => {
+      const formattedMedicine = {
+        ...medicine,
+        discountPercentage: medicine.discountedPrice 
+          ? Math.round(((medicine.price - medicine.discountedPrice) / medicine.price) * 100)
+          : 0,
+        finalPrice: medicine.discountedPrice || medicine.price,
+      };
+
+      if (formattedMedicine.imageUrl) {
+        formattedMedicine.imageUrl = await s3Service.getSignedUrl(formattedMedicine.imageUrl);
+      }
+      
+      if (formattedMedicine.images && formattedMedicine.images.length > 0) {
+        formattedMedicine.images = await Promise.all(
+          formattedMedicine.images.map(url => s3Service.getSignedUrl(url))
+        );
+      }
+
+      return formattedMedicine;
     }));
 
     res.json(

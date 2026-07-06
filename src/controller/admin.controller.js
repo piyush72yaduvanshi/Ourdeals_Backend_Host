@@ -1,4 +1,4 @@
-﻿import { User } from '../models/User.model.js';
+import { User } from '../models/User.model.js';
 import { Booking } from '../models/Booking.model.js';
 import { RealTimeBooking } from '../models/RealTimeBooking.model.js';
 import { Medicine } from '../models/Medicine.model.js';
@@ -361,9 +361,12 @@ const createMedicine = async (req, res) => {
           'temp-' + Date.now()
         );
         
-        medicineData.images = imageUrls;
+        // Map to get only the fileUrl string from the returned objects
+        const extractedUrls = imageUrls.map(img => img.fileUrl || img.fileName || img);
+        
+        medicineData.images = extractedUrls;
         // Set first image as main imageUrl for backward compatibility
-        medicineData.imageUrl = imageUrls[0];
+        medicineData.imageUrl = extractedUrls[0];
       } catch (uploadError) {
         logger.error('Medicine image upload failed', { error: uploadError.message });
         return res.status(400).json(
@@ -418,16 +421,19 @@ const updateMedicine = async (req, res) => {
           id
         );
         
+        // Map to get only the fileUrl string from the returned objects
+        const extractedNewUrls = newImages.map(img => img.fileUrl || img.fileName || img);
+        
         // If existingImages are provided, merge them with new images
         if (updateData.existingImages) {
           const existingImages = Array.isArray(updateData.existingImages) 
             ? updateData.existingImages 
             : [updateData.existingImages];
-          updateData.images = [...existingImages, ...newImages];
+          updateData.images = [...existingImages, ...extractedNewUrls];
           delete updateData.existingImages; // Remove from update data
         } else {
           // Replace all images with new ones
-          updateData.images = newImages;
+          updateData.images = extractedNewUrls;
         }
         
         // Set first image as main imageUrl for backward compatibility

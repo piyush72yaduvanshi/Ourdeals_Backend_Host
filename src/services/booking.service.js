@@ -213,7 +213,7 @@ const createBooking = async (bookingData) => {
 const getBooking = async (bookingId) => {
   try {
     let booking = await Booking.findById(bookingId)
-      .populate('provider', 'firstName lastName phone specialization')
+      .populate('provider', 'firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role')
       .populate('patient', 'firstName lastName phone')
       .populate('prescription')
       .lean();
@@ -222,7 +222,7 @@ const getBooking = async (bookingId) => {
       try {
         const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
         booking = await RealTimeBooking.findById(bookingId)
-          .populate('acceptedProvider', 'firstName lastName phone specialization role')
+          .populate('acceptedProvider', 'firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role')
           .populate('patient', 'firstName lastName phone')
           .lean();
         

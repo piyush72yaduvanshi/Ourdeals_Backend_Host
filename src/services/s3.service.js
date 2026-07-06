@@ -159,7 +159,7 @@ const deleteFile = async (fileUrl) => {
   try {
     if (!fileUrl) return true;
 
-    if (USE_S3 && fileUrl.includes('s3.amazonaws.com')) {
+    if (USE_S3 && fileUrl.includes('amazonaws.com')) {
       // Extract key from S3 URL
       const url = new URL(fileUrl);
       const key = url.pathname.substring(1); // Remove leading slash
@@ -195,7 +195,7 @@ const deleteFile = async (fileUrl) => {
  */
 const getSignedUrl = async (fileUrl, expiresIn = 3600) => {
   try {
-    if (!USE_S3 || !fileUrl.includes('s3.amazonaws.com')) {
+    if (!USE_S3 || !fileUrl.includes('amazonaws.com')) {
       return fileUrl; // Return as-is for local files
     }
 
