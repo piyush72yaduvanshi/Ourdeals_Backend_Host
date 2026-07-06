@@ -45,40 +45,37 @@ const DAYS_OF_WEEK = [
 const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 
 const registerSchema = Joi.object({
-  email: Joi.string().email().required(),
-  password: Joi.string().min(8).required(),
+  email: Joi.string().optional(),
+  password: Joi.string().optional(),
 
-  firstName: Joi.string().required(),
-  lastName: Joi.string().required(),
+  firstName: Joi.string().optional(),
+  lastName: Joi.string().optional(),
 
-  phone: Joi.string()
-    .pattern(/^\+?[1-9]\d{9,14}$/)
-    .required(),
+  phone: Joi.string().optional(),
 
   role: Joi.string()
     .valid(...USER_ROLES)
-    .required(),
+    .optional(),
 
-  address: Joi.string().allow(""),
-  city: Joi.string().allow(""),
-  state: Joi.string().allow(""),
-  pincode: Joi.string().allow(""),
+  address: Joi.string().allow("").optional(),
+  city: Joi.string().allow("").optional(),
+  state: Joi.string().allow("").optional(),
+  pincode: Joi.string().allow("").optional(),
 
   location: Joi.object({
-    type: Joi.string().valid("Point").default("Point").required(),
+    type: Joi.string().valid("Point").default("Point").optional(),
 
     coordinates: Joi.array()
       .items(
-        Joi.number().min(-180).max(180).required(), // longitude
-        Joi.number().min(-90).max(90).required(), // latitude
+        Joi.number().optional(), // longitude
+        Joi.number().optional(), // latitude
       )
-      .length(2)
-      .required(),
-  }).required(),
+      .optional(),
+  }).optional(),
 
   specialization: Joi.when("role", {
     is: "doctor",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   category: Joi.when("role", {
@@ -102,12 +99,12 @@ const registerSchema = Joi.object({
 
   experience: Joi.when("role", {
     is: Joi.valid("doctor", "nurse"),
-    then: Joi.number().min(0).required(),
+    then: Joi.number().optional(),
   }),
 
   consultationFee: Joi.when("role", {
     is: "doctor",
-    then: Joi.number().min(0).required(),
+    then: Joi.number().optional(),
   }),
 
   languages: Joi.when("role", {
@@ -119,7 +116,7 @@ const registerSchema = Joi.object({
     is: "doctor",
     then: Joi.array().items(
       Joi.string().valid("video-call", "audio-call")
-    ).min(1).default(["video-call"]),
+    ).default(["video-call"]),
   }),
 
   about: Joi.when("role", {
@@ -154,19 +151,19 @@ const registerSchema = Joi.object({
 
   minimumOrderAmount: Joi.when("role", {
     is: "pharmacist",
-    then: Joi.number().min(0),
+    then: Joi.number().optional(),
   }),
 
   deliveryFee: Joi.when("role", {
     is: "pharmacist",
-    then: Joi.number().min(0),
+    then: Joi.number().optional(),
   }),
 
   operatingHours: Joi.when("role", {
     is: Joi.valid("pharmacist", "bloodbank", "pathology"),
     then: Joi.object({
-      open: Joi.string().pattern(/^([01]\d|2[0-3]):([0-5]\d)$/),
-      close: Joi.string().pattern(/^([01]\d|2[0-3]):([0-5]\d)$/),
+      open: Joi.string().optional(),
+      close: Joi.string().optional(),
     }),
   }),
 
@@ -182,7 +179,7 @@ const registerSchema = Joi.object({
 
   inchargeName: Joi.when("role", {
     is: "bloodbank",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   testsOffered: Joi.when("role", {
@@ -197,7 +194,7 @@ const registerSchema = Joi.object({
 
   homeCollectionFee: Joi.when("role", {
     is: "pathology",
-    then: Joi.number().min(0),
+    then: Joi.number().optional(),
   }),
 
   licenseNumber: Joi.when("role", {
@@ -208,56 +205,54 @@ const registerSchema = Joi.object({
       "bloodbank",
       "pathology"
     ),
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   pharmacyName: Joi.when("role", {
     is: "pharmacist",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   pharmacistName: Joi.when("role", {
     is: "pharmacist",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   pharmacistRegistrationNumber: Joi.when("role", {
     is: "pharmacist",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   servicesAvailable: Joi.when("role", {
     is: Joi.valid("pharmacist", "bloodbank"),
-    then: Joi.array().items(Joi.string()).min(1).required(),
+    then: Joi.array().items(Joi.string()).optional(),
   }),
 
   vehicleNumber: Joi.when("role", {
     is: "ambulance",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   vehicleType: Joi.when("role", {
     is: "ambulance",
     then: Joi.string()
       .valid("Basic", "Advanced Life Support", "ICU Ambulance")
-      .required(),
+      .optional(),
   }),
 
   driverName: Joi.when("role", {
     is: "ambulance",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   driverMobileNumber: Joi.when("role", {
     is: "ambulance",
-    then: Joi.string()
-      .pattern(/^\+?[1-9]\d{9,14}$/)
-      .required(),
+    then: Joi.string().optional(),
   }),
 
   driverLicense: Joi.when("role", {
     is: "ambulance",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   equipmentAvailable: Joi.when("role", {
@@ -276,29 +271,28 @@ const registerSchema = Joi.object({
       type: Joi.string().valid("Point").default("Point"),
       coordinates: Joi.array()
         .items(
-          Joi.number().min(-180).max(180).required(), // longitude
-          Joi.number().min(-90).max(90).required(), // latitude
+          Joi.number().optional(), // longitude
+          Joi.number().optional(), // latitude
         )
-        .length(2)
-        .required(),
+        .optional(),
       lastUpdated: Joi.date(),
     }),
   }),
 
   bankName: Joi.when("role", {
     is: "bloodbank",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 
   labName: Joi.when("role", {
     is: "pathology",
-    then: Joi.string().required(),
+    then: Joi.string().optional(),
   }),
 });
 
 const loginSchema = Joi.object({
-  phone: Joi.string().required(),
-  password: Joi.string().required(),
+  phone: Joi.string().optional(),
+  password: Joi.string().optional(),
 });
 
 const createBookingSchema = Joi.object({
@@ -310,7 +304,7 @@ const createBookingSchema = Joi.object({
 
   serviceType: Joi.string()
     .valid(...SERVICE_TYPES)
-    .required(),
+    .optional(),
 
   name: Joi.string().trim().when('serviceType', {
     is: 'doctor',
@@ -328,7 +322,7 @@ const createBookingSchema = Joi.object({
     'Orthodpedic'
   ).when('serviceType', {
     is: 'doctor',
-    then: Joi.required(),
+    then: Joi.optional(),
     otherwise: Joi.forbidden()
   }),
 
@@ -336,10 +330,8 @@ const createBookingSchema = Joi.object({
 
   // Made optional - not all bookings need time slots
   timeSlot: Joi.object({
-    start: Joi.string()
-      .pattern(/^([01]\d|2[0-3]):([0-5]\d)$/),
-    end: Joi.string()
-      .pattern(/^([01]\d|2[0-3]):([0-5]\d)$/),
+    start: Joi.string().optional(),
+    end: Joi.string().optional(),
   }).optional(),
 
   // Consultation type for doctor bookings
@@ -356,26 +348,26 @@ const createBookingSchema = Joi.object({
       address: Joi.string().trim(),
       coordinates: Joi.array()
         .items(
-          Joi.number().min(-180).max(180), // longitude
-          Joi.number().min(-90).max(90), // latitude
+          Joi.number().optional(), // longitude
+          Joi.number().optional(), // latitude
         )
-        .length(2),
+        .optional(),
     }),
     // GeoJSON format (for ambulance requests)
     Joi.object({
       type: Joi.string().valid('Point'),
       coordinates: Joi.array()
         .items(
-          Joi.number().min(-180).max(180), // longitude
-          Joi.number().min(-90).max(90), // latitude
+          Joi.number().optional(), // longitude
+          Joi.number().optional(), // latitude
         )
-        .length(2),
+        .optional(),
     })
   ).optional(),
 
   // Support for separate latitude/longitude fields (legacy)
-  latitude: Joi.number().min(-90).max(90),
-  longitude: Joi.number().min(-180).max(180),
+  latitude: Joi.number().optional(),
+  longitude: Joi.number().optional(),
   address: Joi.string().trim(),
 
   hospitalName: Joi.string().trim().optional(),
@@ -386,13 +378,13 @@ const createBookingSchema = Joi.object({
   // Medicine order items
   items: Joi.array().items(
     Joi.object({
-      medicine: Joi.string().pattern(/^[0-9a-fA-F]{24}$/),
-      quantity: Joi.number().min(1).required(),
-      price: Joi.number().min(0).required(),
+      medicine: Joi.string().optional(),
+      quantity: Joi.number().optional(),
+      price: Joi.number().optional(),
     })
   ).when('serviceType', {
     is: 'pharmacist',
-    then: Joi.required(),
+    then: Joi.optional(),
     otherwise: Joi.forbidden()
   }),
 
@@ -404,11 +396,7 @@ const createBookingSchema = Joi.object({
   }),
 
   notes: Joi.string().allow(""),
-  price: Joi.number().when('serviceType', {
-    is: 'bloodbank',
-    then: Joi.number().min(1).required(), // Required and must be >= 1 for blood bank
-    otherwise: Joi.number().min(0).optional()
-  }),
+  price: Joi.number().optional(),
   
   // Blood bank specific fields
   bloodGroup: Joi.string().valid('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-').when('serviceType', {
@@ -416,7 +404,7 @@ const createBookingSchema = Joi.object({
     then: Joi.optional(),
     otherwise: Joi.forbidden()
   }),
-  unitsRequired: Joi.number().min(1).max(10).when('serviceType', {
+  unitsRequired: Joi.number().optional().when('serviceType', {
     is: Joi.valid('bloodbank', 'ambulance'),
     then: Joi.optional(),
     otherwise: Joi.forbidden()
@@ -429,18 +417,18 @@ const createBookingSchema = Joi.object({
 const updateBookingStatusSchema = Joi.object({
   status: Joi.string()
     .valid(...BOOKING_STATUS)
-    .required(),
+    .optional(),
 });
 
 const ratingSchema = Joi.object({
-  rating: Joi.number().min(1).max(5).required(),
+  rating: Joi.number().optional(),
   review: Joi.string().allow(""),
 });
 
 const locationQuerySchema = Joi.object({
-  latitude: Joi.number().min(-90).max(90),
-  longitude: Joi.number().min(-180).max(180),
-  maxDistance: Joi.number().min(0).max(50),
+  latitude: Joi.number().optional(),
+  longitude: Joi.number().optional(),
+  maxDistance: Joi.number().optional(),
   specialization: Joi.string(),
   bloodGroup: Joi.string().valid(...BLOOD_GROUPS),
   serviceType: Joi.string().valid(...SERVICE_TYPES),
@@ -452,36 +440,32 @@ const availabilitySchema = Joi.object({
       Joi.object({
         day: Joi.string()
           .valid(...DAYS_OF_WEEK)
-          .required(),
+          .optional(),
         slots: Joi.array()
           .items(
             Joi.object({
-              startTime: Joi.string()
-                .pattern(/^([01]\d|2[0-3]):([0-5]\d)$/)
-                .required(),
-              endTime: Joi.string()
-                .pattern(/^([01]\d|2[0-3]):([0-5]\d)$/)
-                .required(),
+              startTime: Joi.string().optional(),
+              endTime: Joi.string().optional(),
               isAvailable: Joi.boolean(),
             }),
           )
-          .required(),
+          .optional(),
       }),
     )
-    .required(),
+    .optional(),
 });
 
 const medicineSchema = Joi.object({
-  name: Joi.string().required(),
+  name: Joi.string().optional(),
   genericName: Joi.string().allow(""),
-  manufacturer: Joi.string().required(),
+  manufacturer: Joi.string().optional(),
   description: Joi.string().allow(""),
-  price: Joi.number().min(0).required(),
-  discountedPrice: Joi.number().min(0),
-  stock: Joi.number().min(0).required(),
-  category: Joi.string().required(),
+  price: Joi.number().optional(),
+  discountedPrice: Joi.number().optional(),
+  stock: Joi.number().optional(),
+  category: Joi.string().optional(),
   requiresPrescription: Joi.boolean(),
-  dosageForm: Joi.string().required(),
+  dosageForm: Joi.string().optional(),
   strength: Joi.string().allow(""),
   packaging: Joi.string().allow(""),
   expiryDate: Joi.date(),
@@ -490,13 +474,13 @@ const medicineSchema = Joi.object({
 const bloodStockSchema = Joi.object({
   bloodGroup: Joi.string()
     .valid(...BLOOD_GROUPS)
-    .required(),
-  unitsAvailable: Joi.number().min(0).required(),
+    .optional(),
+  unitsAvailable: Joi.number().optional(),
 });
 
 const paginationSchema = Joi.object({
-  page: Joi.number().min(1).default(1),
-  limit: Joi.number().min(1).max(100).default(20),
+  page: Joi.number().default(1),
+  limit: Joi.number().default(20),
 });
 
 const bookingQuerySchema = paginationSchema.keys({
@@ -516,10 +500,9 @@ const emergencySchema = Joi.alternatives().try(
       type: Joi.string().valid('Point').default('Point'),
       coordinates: Joi.array()
         .items(
-          Joi.number().min(-180).max(180), // longitude
-          Joi.number().min(-90).max(90), // latitude
+          Joi.number().optional(), // longitude
+          Joi.number().optional(), // latitude
         )
-        .length(2)
         .default([0, 0]), // Default coordinates if not provided
     }).default({ type: 'Point', coordinates: [0, 0] }),
     address: Joi.string().trim().default('Emergency Location'),
@@ -527,27 +510,25 @@ const emergencySchema = Joi.alternatives().try(
   }),
   // Legacy format
   Joi.object({
-    latitude: Joi.number().min(-90).max(90).default(0),
-    longitude: Joi.number().min(-180).max(180).default(0),
+    latitude: Joi.number().default(0),
+    longitude: Joi.number().default(0),
     address: Joi.string().trim().default('Emergency Location'),
     notes: Joi.string().allow(""),
   })
 );
 
 const idParamSchema = Joi.object({
-  id: Joi.string()
-    .pattern(/^[0-9a-fA-F]{24}$/)
-    .required(),
+  id: Joi.string().optional(),
 });
 
 const ambulanceSchema = Joi.object({
   // User fields (required for creation)
-  email: Joi.string().email(),
-  password: Joi.string().min(6),
+  email: Joi.string().optional(),
+  password: Joi.string().optional(),
   role: Joi.string().valid("ambulance"),
   firstName: Joi.string().trim(),
   lastName: Joi.string().trim(),
-  phone: Joi.string().pattern(/^[6-9]\d{9}$/),
+  phone: Joi.string().optional(),
   city: Joi.string().trim(),
   state: Joi.string().trim(),
   pincode: Joi.string().trim(),
@@ -555,11 +536,10 @@ const ambulanceSchema = Joi.object({
     type: Joi.string().valid("Point").default("Point"),
     coordinates: Joi.array()
       .items(
-        Joi.number().min(-180).max(180).required(),
-        Joi.number().min(-90).max(90).required()
+        Joi.number().optional(),
+        Joi.number().optional()
       )
-      .length(2)
-      .required(),
+      .optional(),
   }),
   // Ambulance specific fields
   driverName: Joi.string().trim(),
@@ -572,59 +552,48 @@ const ambulanceSchema = Joi.object({
     type: Joi.string().valid("Point").default("Point"),
     coordinates: Joi.array()
       .items(
-        Joi.number().min(-180).max(180).required(),
-        Joi.number().min(-90).max(90).required()
+        Joi.number().optional(),
+        Joi.number().optional()
       )
-      .length(2)
-      .required(),
+      .optional(),
   }),
 });
 
 const pathologyTestSchema = Joi.object({
   testsOffered: Joi.array().items(
     Joi.object({
-      name: Joi.string().required(),
+      name: Joi.string().optional(),
       description: Joi.string().allow(""),
-      price: Joi.number().min(0).required(),
+      price: Joi.number().optional(),
       preparationInstructions: Joi.string().allow(""),
       reportDeliveryTime: Joi.string().default("24hrs"),
     })
-  ).required(),
+  ).optional(),
 });
 
 const bloodStockUpdateSchema = Joi.object({
-  bloodStock: Joi.array().items(bloodStockSchema).required(),
+  bloodStock: Joi.array().items(bloodStockSchema).optional(),
 });
 
 const createOrderSchema = Joi.object({
-  bookingId: Joi.string()
-    .pattern(/^[0-9a-fA-F]{24}$/)
-    .required(),
+  bookingId: Joi.string().optional(),
 });
 
 const verifyPaymentSchema = Joi.object({
-  razorpay_order_id: Joi.string().required(),
-  razorpay_payment_id: Joi.string().required(),
-  razorpay_signature: Joi.string().required(),
-  bookingId: Joi.string()
-    .pattern(/^[0-9a-fA-F]{24}$/)
-    .required(),
+  razorpay_order_id: Joi.string().optional(),
+  razorpay_payment_id: Joi.string().optional(),
+  razorpay_signature: Joi.string().optional(),
+  bookingId: Joi.string().optional(),
 });
 
 const bankDetailsSchema = Joi.object({
-  accountHolderName: Joi.string().trim().required(),
-  accountNumber: Joi.string()
-    .pattern(/^[0-9]{9,18}$/)
-    .required(),
-  ifsc: Joi.string()
-    .pattern(/^[A-Z]{4}0[A-Z0-9]{6}$/)
-    .required(),
+  accountHolderName: Joi.string().trim().optional(),
+  accountNumber: Joi.string().optional(),
+  ifsc: Joi.string().optional(),
 });
 
 const releasePayoutSchema = Joi.object({
-  bookingId: Joi.string()
-    .pattern(/^[0-9a-fA-F]{24}$/)
-    .required(),
+  bookingId: Joi.string().optional(),
 });
 
 export {
