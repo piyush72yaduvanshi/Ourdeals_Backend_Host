@@ -1,6 +1,9 @@
 import mongoose from 'mongoose';
+import dotenv from 'dotenv';
 
-const MONGODB_URI = "mongodb+srv://piyushyaduvanshi9956_db_user:GtBbTG7vfd62LAAo@cluster0.d2y2ftr.mongodb.net/ourdeals_healthcare?retryWrites=true&w=majority&appName=Cluster0";
+dotenv.config();
+
+const MONGODB_URI = process.env.MONGODB_URI;
 
 async function run() {
   try {
