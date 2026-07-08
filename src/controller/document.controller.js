@@ -218,17 +218,15 @@ const getDocumentDownloadUrl = async (req, res) => {
     const document = user.documents[fieldName];
     
     if (Array.isArray(document)) {
-      const urls = await Promise.all(
-        document.map(doc => s3Service.getSignedDownloadUrl(doc.fileName))
-      );
-      return res.json(successResponse("Download URLs generated", { urls }));
+      const urls = document.map(doc => s3Service.cleanS3Url(doc.fileUrl || doc.fileName));
+      return res.json(successResponse("Document URLs retrieved", { urls }));
     } else {
-      const url = await s3Service.getSignedDownloadUrl(document.fileName);
-      return res.json(successResponse("Download URL generated", { url }));
+      const url = s3Service.cleanS3Url(document.fileUrl || document.fileName);
+      return res.json(successResponse("Document URL retrieved", { url }));
     }
   } catch (error) {
     logger.error("Get download URL failed", { error: error.message });
-    res.status(500).json(errorResponse("Failed to generate download URL"));
+    res.status(500).json(errorResponse("Failed to retrieve document URL"));
   }
 };
 

@@ -344,7 +344,7 @@ export const addDocumentsToBooking = async (req, res) => {
 };
 
 /**
- * Get booking documents with signed URLs
+ * Get booking documents with clean object URLs
  * GET /api/v1/bookings/:bookingId/documents
  */
 export const getBookingDocuments = async (req, res) => {
@@ -379,7 +379,7 @@ export const getBookingDocuments = async (req, res) => {
       );
     }
 
-    // Generate signed URLs for all documents
+    // Clean any signed URLs to standard object URLs
     const documentsWithUrls = {
       medicalReports: [],
       previousPrescriptions: [],
@@ -389,10 +389,10 @@ export const getBookingDocuments = async (req, res) => {
     // Medical reports
     if (booking.patientDocuments.medicalReports) {
       for (const doc of booking.patientDocuments.medicalReports) {
-        const signedUrl = await s3Service.getSignedDownloadUrl(doc.fileName, 3600);
+        const docObj = doc.toObject();
         documentsWithUrls.medicalReports.push({
-          ...doc.toObject(),
-          signedUrl,
+          ...docObj,
+          fileUrl: s3Service.cleanS3Url(docObj.fileUrl || docObj.fileName),
         });
       }
     }
@@ -400,10 +400,10 @@ export const getBookingDocuments = async (req, res) => {
     // Previous prescriptions
     if (booking.patientDocuments.previousPrescriptions) {
       for (const doc of booking.patientDocuments.previousPrescriptions) {
-        const signedUrl = await s3Service.getSignedDownloadUrl(doc.fileName, 3600);
+        const docObj = doc.toObject();
         documentsWithUrls.previousPrescriptions.push({
-          ...doc.toObject(),
-          signedUrl,
+          ...docObj,
+          fileUrl: s3Service.cleanS3Url(docObj.fileUrl || docObj.fileName),
         });
       }
     }
@@ -411,10 +411,10 @@ export const getBookingDocuments = async (req, res) => {
     // Other documents
     if (booking.patientDocuments.otherDocuments) {
       for (const doc of booking.patientDocuments.otherDocuments) {
-        const signedUrl = await s3Service.getSignedDownloadUrl(doc.fileName, 3600);
+        const docObj = doc.toObject();
         documentsWithUrls.otherDocuments.push({
-          ...doc.toObject(),
-          signedUrl,
+          ...docObj,
+          fileUrl: s3Service.cleanS3Url(docObj.fileUrl || docObj.fileName),
         });
       }
     }

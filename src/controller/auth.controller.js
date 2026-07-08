@@ -262,10 +262,10 @@ const getCurrentUser = async (req, res) => {
       return res.status(404).json(errorResponse('User not found'));
     }
 
-    // Generate signed URL for profile picture
+    // Clean profile picture URL
     const userObj = user.toObject();
     if (userObj.profilePicture) {
-      userObj.profilePictureUrl = await s3Service.getSignedUrl(userObj.profilePicture);
+      userObj.profilePicture = s3Service.cleanS3Url(userObj.profilePicture);
     }
 
     return res.json(successResponse('User fetched', userObj));
@@ -433,10 +433,10 @@ const updateProfile = async (req, res) => {
       return res.status(404).json(errorResponse('User not found'));
     }
 
-    // Generate signed URL for response
+    // Clean profile picture URL
     const userObj = user.toObject();
     if (userObj.profilePicture) {
-      userObj.profilePictureUrl = await s3Service.getSignedUrl(userObj.profilePicture);
+      userObj.profilePicture = s3Service.cleanS3Url(userObj.profilePicture);
     }
 
     return res.json(successResponse('Profile updated successfully', userObj));

@@ -1,5 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { logger } from '../utils/logger.util.js';
 import fs from 'fs';
 import path from 'path';
@@ -188,30 +187,28 @@ const deleteFile = async (fileUrl) => {
 };
 
 /**
- * Generate signed URL for private S3 objects
- * @param {String} fileUrl - S3 URL
- * @param {Number} expiresIn - Expiration time in seconds (default: 3600)
- * @returns {String} - Signed URL
+ * Clean S3 URL by removing any signed URL parameters
+ * Converts signed URLs back to standard object URLs
+ * @param {String} fileUrl - S3 URL (may contain signed URL parameters)
+ * @returns {String} - Clean S3 object URL
  */
-const getSignedUrl = async (fileUrl, expiresIn = 3600) => {
+const cleanS3Url = (fileUrl) => {
   try {
-    if (!USE_S3 || !fileUrl.includes('amazonaws.com')) {
-      return fileUrl; // Return as-is for local files
-    }
-
-    const url = new URL(fileUrl);
-    const key = url.pathname.substring(1);
+    if (!fileUrl) return fileUrl;
     
-    const command = new GetObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: key,
-    });
-
-    const signedUrl = await awsGetSignedUrl(s3Client, command, { expiresIn });
-    return signedUrl;
+    // If it's a local file path, return as-is
+    if (!fileUrl.includes('amazonaws.com')) {
+      return fileUrl;
+    }
+    
+    // Parse URL and remove query parameters (X-Amz-* parameters)
+    const url = new URL(fileUrl);
+    
+    // Return clean URL without query parameters
+    return `${url.protocol}//${url.host}${url.pathname}`;
   } catch (error) {
-    logger.error('Signed URL generation failed', { error: error.message });
-    return fileUrl; // Return original URL on error
+    logger.warn('Failed to clean S3 URL', { error: error.message, fileUrl });
+    return fileUrl; // Return original on error
   }
 };
 
@@ -342,7 +339,7 @@ export const s3Service = {
   uploadFile,
   uploadMultipleFiles,
   deleteFile,
-  getSignedUrl,
+  cleanS3Url,
   uploadDocuments,
   cleanupTempFiles,
 };

@@ -786,28 +786,24 @@ const searchMedicines = async (req, res) => {
       Medicine.countDocuments(query),
     ]);
 
-    // Generate signed URLs for medicine images
-    const medicinesWithSignedUrls = await Promise.all(
-      medicines.map(async (medicine) => {
-        const medicineObj = medicine.toObject();
-        
-        // Generate signed URL for main image
-        if (medicineObj.imageUrl) {
-          medicineObj.imageUrlSigned = await s3Service.getSignedUrl(medicineObj.imageUrl);
-        }
-        
-        // Generate signed URLs for all images
-        if (medicineObj.images && medicineObj.images.length > 0) {
-          medicineObj.imagesSigned = await Promise.all(
-            medicineObj.images.map(imageUrl => s3Service.getSignedUrl(imageUrl))
-          );
-        }
-        
-        return medicineObj;
-      })
-    );
+    // Clean any signed URLs to standard object URLs
+    const medicinesWithCleanUrls = medicines.map((medicine) => {
+      const medicineObj = medicine.toObject();
+      
+      // Clean main image URL
+      if (medicineObj.imageUrl) {
+        medicineObj.imageUrl = s3Service.cleanS3Url(medicineObj.imageUrl);
+      }
+      
+      // Clean all image URLs
+      if (medicineObj.images && medicineObj.images.length > 0) {
+        medicineObj.images = medicineObj.images.map(imageUrl => s3Service.cleanS3Url(imageUrl));
+      }
+      
+      return medicineObj;
+    });
 
-    res.json(paginatedResponse('Medicines fetched', medicinesWithSignedUrls, page, limit, total));
+    res.json(paginatedResponse('Medicines fetched', medicinesWithCleanUrls, page, limit, total));
   } catch (error) {
     res.status(500).json(errorResponse(error.message || 'Failed to search medicines'));
   }
@@ -830,19 +826,17 @@ const getMedicineById = async (req, res) => {
       return res.status(404).json(errorResponse('Medicine is not available'));
     }
 
-    // Generate signed URLs for medicine images
+    // Clean any signed URLs to standard object URLs
     const medicineObj = medicine.toObject();
     
-    // Generate signed URL for main image
+    // Clean main image URL
     if (medicineObj.imageUrl) {
-      medicineObj.imageUrlSigned = await s3Service.getSignedUrl(medicineObj.imageUrl);
+      medicineObj.imageUrl = s3Service.cleanS3Url(medicineObj.imageUrl);
     }
     
-    // Generate signed URLs for all images
+    // Clean all image URLs
     if (medicineObj.images && medicineObj.images.length > 0) {
-      medicineObj.imagesSigned = await Promise.all(
-        medicineObj.images.map(imageUrl => s3Service.getSignedUrl(imageUrl))
-      );
+      medicineObj.images = medicineObj.images.map(imageUrl => s3Service.cleanS3Url(imageUrl));
     }
 
     res.json(successResponse('Medicine details fetched', medicineObj));
@@ -1465,30 +1459,26 @@ const globalSearch = async (req, res) => {
       searchBloodBanksInternal(query, location),
     ]);
 
-    // Generate signed URLs for medicine images
-    const medicinesWithSignedUrls = await Promise.all(
-      medicines.map(async (medicine) => {
-        const medicineObj = medicine.toObject();
-        
-        // Generate signed URL for main image
-        if (medicineObj.imageUrl) {
-          medicineObj.imageUrlSigned = await s3Service.getSignedUrl(medicineObj.imageUrl);
-        }
-        
-        // Generate signed URLs for all images
-        if (medicineObj.images && medicineObj.images.length > 0) {
-          medicineObj.imagesSigned = await Promise.all(
-            medicineObj.images.map(imageUrl => s3Service.getSignedUrl(imageUrl))
-          );
-        }
-        
-        return medicineObj;
-      })
-    );
+    // Clean any signed URLs to standard object URLs
+    const medicinesWithCleanUrls = medicines.map((medicine) => {
+      const medicineObj = medicine.toObject();
+      
+      // Clean main image URL
+      if (medicineObj.imageUrl) {
+        medicineObj.imageUrl = s3Service.cleanS3Url(medicineObj.imageUrl);
+      }
+      
+      // Clean all image URLs
+      if (medicineObj.images && medicineObj.images.length > 0) {
+        medicineObj.images = medicineObj.images.map(imageUrl => s3Service.cleanS3Url(imageUrl));
+      }
+      
+      return medicineObj;
+    });
 
     const results = {
       doctors: doctors.slice(0, 5),
-      medicines: medicinesWithSignedUrls.slice(0, 5),
+      medicines: medicinesWithCleanUrls.slice(0, 5),
       pharmacies: pharmacies.slice(0, 5),
       labs: labs.slice(0, 5),
       bloodBanks: bloodBanks.slice(0, 5),
@@ -1685,10 +1675,10 @@ const getPrescriptionOffers = async (req, res, next) => {
       
     if (!booking) return res.status(404).json(errorResponse("Order not found"));
     
-    // Generate signed urls for offers
+    // Clean any signed URLs to standard object URLs
     for (const offer of booking.offers) {
       if (offer.vendorId && offer.vendorId.profilePic) {
-        offer.vendorId.profilePicSigned = await s3Service.getSignedUrl(offer.vendorId.profilePic);
+        offer.vendorId.profilePic = s3Service.cleanS3Url(offer.vendorId.profilePic);
       }
     }
     

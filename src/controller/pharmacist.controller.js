@@ -228,9 +228,7 @@ const getOrders = async (req, res) => {
       };
       
       if (transformed.prescriptionImages && transformed.prescriptionImages.length > 0) {
-        transformed.prescriptionImagesSigned = await Promise.all(
-          transformed.prescriptionImages.map(img => s3Service.getSignedUrl(img))
-        );
+        transformed.prescriptionImages = transformed.prescriptionImages.map(img => s3Service.cleanS3Url(img));
       }
       
       return transformed;
@@ -322,9 +320,7 @@ const getPendingOrders = async (req, res) => {
       };
       
       if (transformed.prescriptionImages && transformed.prescriptionImages.length > 0) {
-        transformed.prescriptionImagesSigned = await Promise.all(
-          transformed.prescriptionImages.map(img => s3Service.getSignedUrl(img))
-        );
+        transformed.prescriptionImages = transformed.prescriptionImages.map(img => s3Service.cleanS3Url(img));
       }
       
       return transformed;

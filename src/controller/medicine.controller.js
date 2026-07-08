@@ -72,8 +72,8 @@ const getAllMedicines = async (req, res) => {
       Medicine.countDocuments(query),
     ]);
 
-    // Calculate discount percentage for each medicine and generate signed URLs
-    const medicinesWithDiscount = await Promise.all(medicines.map(async (medicine) => {
+    // Calculate discount percentage and clean URLs
+    const medicinesWithDiscount = medicines.map((medicine) => {
       const formattedMedicine = {
         ...medicine,
         discountPercentage: medicine.discountedPrice 
@@ -83,17 +83,15 @@ const getAllMedicines = async (req, res) => {
       };
 
       if (formattedMedicine.imageUrl) {
-        formattedMedicine.imageUrl = await s3Service.getSignedUrl(formattedMedicine.imageUrl);
+        formattedMedicine.imageUrl = s3Service.cleanS3Url(formattedMedicine.imageUrl);
       }
       
       if (formattedMedicine.images && formattedMedicine.images.length > 0) {
-        formattedMedicine.images = await Promise.all(
-          formattedMedicine.images.map(url => s3Service.getSignedUrl(url))
-        );
+        formattedMedicine.images = formattedMedicine.images.map(url => s3Service.cleanS3Url(url));
       }
 
       return formattedMedicine;
-    }));
+    });
 
     res.json(
       paginatedResponse(

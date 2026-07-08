@@ -116,34 +116,31 @@ const getPendingApprovals = async (req, res) => {
       .select('-password')
       .sort({ createdAt: -1 });
 
-    // Generate signed URLs for documents if using S3
-    const usersWithSignedUrls = await Promise.all(
-      pendingUsers.map(async (user) => {
-        const userObj = user.toObject();
-        
-        // Generate signed URL for profile picture
-        if (userObj.profilePicture) {
-          userObj.profilePictureUrl = await s3Service.getSignedUrl(userObj.profilePicture);
-        }
-        
-        // Generate signed URLs for documents
-        if (userObj.documents) {
-          userObj.documentUrls = {};
-          for (const [key, value] of Object.entries(userObj.documents)) {
-            if (value) {
-              userObj.documentUrls[key] = await s3Service.getSignedUrl(value);
-            }
+    // Clean any signed URLs from database to standard object URLs
+    const usersWithCleanUrls = pendingUsers.map((user) => {
+      const userObj = user.toObject();
+      
+      // Clean profile picture URL
+      if (userObj.profilePicture) {
+        userObj.profilePicture = s3Service.cleanS3Url(userObj.profilePicture);
+      }
+      
+      // Clean document URLs
+      if (userObj.documents) {
+        for (const [key, value] of Object.entries(userObj.documents)) {
+          if (value) {
+            userObj.documents[key] = s3Service.cleanS3Url(value);
           }
         }
-        
-        return userObj;
-      })
-    );
+      }
+      
+      return userObj;
+    });
 
     return res.json(
       successResponse(
         'Pending approvals fetched',
-        usersWithSignedUrls
+        usersWithCleanUrls
       )
     );
   } catch (error) {
@@ -521,30 +518,26 @@ const getAllMedicines = async (req, res) => {
       Medicine.countDocuments(query),
     ]);
 
-    // Generate signed URLs for medicine images
-    const medicinesWithSignedUrls = await Promise.all(
-      medicines.map(async (medicine) => {
-        const medicineObj = medicine.toObject();
-        
-        // Generate signed URL for main image
-        if (medicineObj.imageUrl) {
-          medicineObj.imageUrlSigned = await s3Service.getSignedUrl(medicineObj.imageUrl);
-        }
-        
-        // Generate signed URLs for all images
-        if (medicineObj.images && medicineObj.images.length > 0) {
-          medicineObj.imagesSigned = await Promise.all(
-            medicineObj.images.map(imageUrl => s3Service.getSignedUrl(imageUrl))
-          );
-        }
-        
-        return medicineObj;
-      })
-    );
+    // Clean any signed URLs to standard object URLs
+    const medicinesWithCleanUrls = medicines.map((medicine) => {
+      const medicineObj = medicine.toObject();
+      
+      // Clean main image URL
+      if (medicineObj.imageUrl) {
+        medicineObj.imageUrl = s3Service.cleanS3Url(medicineObj.imageUrl);
+      }
+      
+      // Clean all image URLs
+      if (medicineObj.images && medicineObj.images.length > 0) {
+        medicineObj.images = medicineObj.images.map(imageUrl => s3Service.cleanS3Url(imageUrl));
+      }
+      
+      return medicineObj;
+    });
 
     return res.json(
       successResponse('Medicines fetched successfully', {
-        medicines: medicinesWithSignedUrls,
+        medicines: medicinesWithCleanUrls,
         total,
         page: Number(page),
         limit: Number(limit),
@@ -925,7 +918,7 @@ const getUserDocuments = async (req, res) => {
       return res.status(404).json(errorResponse('User not found'));
     }
 
-    // Generate signed URLs for all documents
+    // Clean any signed URLs to standard object URLs
     const result = {
       user: {
         _id: user._id,
@@ -938,16 +931,16 @@ const getUserDocuments = async (req, res) => {
       documents: {},
     };
 
-    // Generate signed URL for profile picture
+    // Clean profile picture URL
     if (user.profilePicture) {
-      result.profilePicture = await s3Service.getSignedUrl(user.profilePicture);
+      result.profilePicture = s3Service.cleanS3Url(user.profilePicture);
     }
 
-    // Generate signed URLs for documents
+    // Clean document URLs
     if (user.documents) {
       for (const [key, value] of Object.entries(user.documents)) {
         if (value) {
-          result.documents[key] = await s3Service.getSignedUrl(value);
+          result.documents[key] = s3Service.cleanS3Url(value);
         }
       }
     }

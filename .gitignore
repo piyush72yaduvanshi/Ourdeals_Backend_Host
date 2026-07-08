@@ -3,7 +3,7 @@ node_modules
 .env.local
 logs
 
-
+package-lock.json
 
 # Docker
 
