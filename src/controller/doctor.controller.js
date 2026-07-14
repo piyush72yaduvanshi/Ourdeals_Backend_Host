@@ -5,6 +5,7 @@ import { Prescription } from '../models/Prescription.model.js';
 import { s3Service } from '../services/s3.service.js';
 import { successResponse, errorResponse, paginatedResponse } from '../utils/response.util.js';
 import { logger } from '../utils/logger.util.js';
+import { parseAsIST } from '../utils/timezone.util.js';
 
 
 const DOCTOR_ALLOWED_FIELDS = [
@@ -282,14 +283,26 @@ const uploadPrescriptionFile = async (req, res) => {
     const bookingId = req.params.id;
     const notes = req.body?.notes?.toString().trim() || '';
 
+    console.log('📋 Upload Prescription - Start', {
+      doctorId,
+      bookingId,
+      hasFile: !!req.file,
+      fileName: req.file?.originalname,
+    });
+
     if (!req.file) {
       return res.status(400).json(errorResponse('Prescription file is required'));
     }
 
+    // Get booking
+    console.log('📋 Fetching booking...');
     const bookingRecord = await bookingService.getBooking(bookingId);
     if (!bookingRecord) {
+      console.log('❌ Booking not found');
       return res.status(404).json(errorResponse('Booking not found'));
     }
+
+    console.log('✅ Booking found:', bookingRecord.status);
 
     // Handle both Booking (provider) and RealTimeBooking (acceptedProvider) models
     const providerId = bookingRecord.provider?.toString?.()
@@ -300,8 +313,6 @@ const uploadPrescriptionFile = async (req, res) => {
     console.log('🔐 Authorization Check:', {
       doctorId,
       providerId,
-      bookingProvider: bookingRecord.provider,
-      bookingAcceptedProvider: bookingRecord.acceptedProvider,
       match: providerId === doctorId
     });
 
@@ -315,11 +326,19 @@ const uploadPrescriptionFile = async (req, res) => {
       );
     }
 
+    // Upload file to S3
+    console.log('📤 Uploading file to S3...');
     const uploadResult = await s3Service.uploadFile(req.file, 'prescriptions', doctorId);
+    console.log('✅ File uploaded:', uploadResult);
+    
     const prescriptionFileUrl = s3Service.cleanS3Url(uploadResult.fileUrl);
+    console.log('🔗 Clean URL:', prescriptionFileUrl);
 
+    // Create or update prescription
+    console.log('💊 Creating/Updating prescription...');
     let prescription = await Prescription.findOne({ booking: bookingId });
     if (prescription) {
+      console.log('✏️ Updating existing prescription');
       prescription.prescriptionFile = prescriptionFileUrl;
       if (notes) {
         prescription.notes = notes;
@@ -327,6 +346,7 @@ const uploadPrescriptionFile = async (req, res) => {
       }
       await prescription.save();
     } else {
+      console.log('➕ Creating new prescription');
       prescription = await Prescription.create({
         booking: bookingId,
         patient: bookingRecord.patient?._id || bookingRecord.patient,
@@ -338,22 +358,27 @@ const uploadPrescriptionFile = async (req, res) => {
         notes: notes || undefined,
       });
 
-      // Update booking with prescription reference - handle both Booking and RealTimeBooking models
+      // Update booking with prescription reference
+      console.log('🔄 Updating booking with prescription reference...');
       try {
         await Booking.findByIdAndUpdate(bookingId, {
           prescription: prescription._id,
           status: bookingRecord.status === 'accepted' ? 'in_progress' : bookingRecord.status,
         });
+        console.log('✅ Booking model updated');
       } catch (err) {
-        // If not found in Booking, try RealTimeBooking
+        console.log('⚠️ Booking not found, trying RealTimeBooking...');
         const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
         await RealTimeBooking.findByIdAndUpdate(bookingId, {
           prescription: prescription._id,
           status: bookingRecord.status === 'accepted' ? 'in_progress' : bookingRecord.status,
         });
+        console.log('✅ RealTimeBooking model updated');
       }
     }
 
+    console.log('✅ Prescription uploaded successfully!');
+    
     logger.info('Prescription file uploaded', {
       bookingId,
       doctorId,
@@ -364,9 +389,22 @@ const uploadPrescriptionFile = async (req, res) => {
       prescriptionId: prescription._id,
       prescriptionFile: prescriptionFileUrl,
     }));
+
   } catch (error) {
-    logger.error('Upload prescription file failed', { error: error.message });
-    res.status(500).json(errorResponse(error.message || 'Failed to upload prescription'));
+    console.error('❌ Upload Prescription Error:', {
+      message: error.message,
+      stack: error.stack,
+      bookingId: req.params.id,
+      doctorId: req.user?.userId,
+    });
+
+    logger.error('Failed to upload prescription', {
+      error: error.message,
+      stack: error.stack,
+      bookingId: req.params.id,
+    });
+
+    res.status(500).json(errorResponse('Failed to upload prescription', error.message));
   }
 };
 
@@ -515,10 +553,10 @@ const scheduleAppointment = async (req, res) => {
       return res.status(403).json(errorResponse('Not authorized to schedule this appointment'));
     }
 
-    // Combine date and time if necessary, or just save them directly
+    // Parse and convert IST time to proper format
     let timeToSave = scheduledTime;
     if (scheduledDate && scheduledTime) {
-      // Trying to construct a valid Date string
+      // Combine date and time
       const [time, period] = scheduledTime.split(' ');
       let [hours, minutes] = time.split(':');
       hours = parseInt(hours);
@@ -527,7 +565,12 @@ const scheduleAppointment = async (req, res) => {
       
       const dateObj = new Date(scheduledDate);
       dateObj.setHours(hours, parseInt(minutes), 0, 0);
-      timeToSave = dateObj.toISOString();
+      
+      // Parse as IST to save correctly
+      timeToSave = parseAsIST(dateObj.toISOString());
+    } else if (scheduledTime) {
+      // Only time provided, parse as IST
+      timeToSave = parseAsIST(scheduledTime);
     }
 
     let updatedBooking;

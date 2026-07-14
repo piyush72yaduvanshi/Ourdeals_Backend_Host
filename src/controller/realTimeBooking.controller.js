@@ -1,6 +1,7 @@
 import { realTimeBookingService } from "../services/realTimeBooking.service.js";
 import { RealTimeBooking } from "../models/RealTimeBooking.model.js";
 import { successResponse, errorResponse, paginatedResponse } from "../utils/response.util.js";
+import { parseAsIST } from "../utils/timezone.util.js";
 
 // Patient creates a real-time booking request
 const createBookingRequest = async (req, res) => {
@@ -24,7 +25,9 @@ const createBookingRequest = async (req, res) => {
       title: title,
       requirements: {
         description: description,
-        preferredTime: requirements.preferredTime || req.body.preferredTime,
+        preferredTime: (requirements.preferredTime || req.body.preferredTime) 
+          ? parseAsIST(requirements.preferredTime || req.body.preferredTime) 
+          : undefined,
         specialRequirements: requirements.specialRequirements || req.body.specialRequirements,
       },
       location: {

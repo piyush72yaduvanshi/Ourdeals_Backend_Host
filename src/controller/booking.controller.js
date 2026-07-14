@@ -2,6 +2,7 @@ import { bookingService } from '../services/booking.service.js';
 import { s3Service } from '../services/s3.service.js';
 import { successResponse, errorResponse } from '../utils/response.util.js';
 import { logger } from '../utils/logger.util.js';
+import { parseAsIST } from '../utils/timezone.util.js';
 
 /**
  * Create booking with optional medical documents upload
@@ -47,7 +48,7 @@ export const createBookingWithDocuments = async (req, res) => {
       patient: patientId,
       provider: req.body.provider,
       serviceType: req.body.serviceType,
-      scheduledTime: req.body.scheduledTime,
+      scheduledTime: req.body.scheduledTime ? parseAsIST(req.body.scheduledTime) : undefined,
       price: parseFloat(req.body.price),
       notes: req.body.notes,
       consultationType: req.body.consultationType || 'VIDEO_CALL',

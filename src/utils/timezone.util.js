@@ -94,19 +94,50 @@ export const hasTimezoneInfo = (dateString) => {
 
 /**
  * Parse date string assuming IST if no timezone provided
+ * AND ADD IST OFFSET TO SAVE CORRECTLY IN UTC DATABASE
  * 
- * @param {String|Date} dateInput - Date input
- * @returns {Date} - Parsed date
+ * @param {String|Date} dateInput - Date input from frontend (assumed IST)
+ * @returns {Date} - Date object with IST time correctly stored as UTC
+ * 
+ * Example:
+ * Frontend sends: "2026-07-14T12:00:00" (meaning 12 PM IST)
+ * Without fix: Saved as 12:00 UTC in DB → Shows as 5:30 PM IST
+ * With fix: Saved as 6:30 UTC in DB → Shows as 12:00 PM IST ✅
  */
 export const parseAsIST = (dateInput) => {
+  if (!dateInput) return undefined;
+  
   if (dateInput instanceof Date) return dateInput;
   
-  // If already has timezone info, use as-is
+  // If already has timezone info (Z or +/-HH:MM), use as-is
   if (hasTimezoneInfo(dateInput)) {
     return new Date(dateInput);
   }
   
-  // If no timezone, assume it's IST and parse accordingly
-  // Just create Date object - we'll convert when needed
-  return new Date(dateInput);
+  // NO timezone info → Assume it's IST time
+  // Need to subtract IST offset so it saves correctly as UTC
+  const date = new Date(dateInput);
+  
+  // Check if valid
+  if (isNaN(date.getTime())) {
+    console.error('Invalid date in parseAsIST:', dateInput);
+    return undefined;
+  }
+  
+  // When frontend sends "12:00" thinking it's IST,
+  // new Date() treats it as local system time (UTC on server)
+  // So we need to ADD IST offset (5.5 hours) to store correct time
+  // 
+  // Example:
+  // Frontend wants: 12:00 PM IST
+  // new Date("2026-07-14T12:00:00") creates: 12:00 UTC
+  // To store as 12:00 IST in UTC: 12:00 - 5:30 = 6:30 UTC ❌ WRONG!
+  // Actually: We want DB to store time that SHOWS as 12:00 IST
+  // IST = UTC + 5:30, so to store 12:00 IST we store: 6:30 UTC ✅
+  
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  
+  // Subtract offset so stored UTC time shows correctly in IST
+  return new Date(date.getTime() - IST_OFFSET_MS);
 };
+
