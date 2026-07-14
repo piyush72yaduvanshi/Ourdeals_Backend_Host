@@ -32,6 +32,7 @@ const PrescriptionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Booking',
     required: true,
+    unique: true, // Prevent duplicate prescriptions for same booking
     index: true,
   },
   patient: {
