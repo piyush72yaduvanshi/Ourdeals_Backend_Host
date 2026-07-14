@@ -200,6 +200,30 @@ const sendPrescriptionAvailable = async (patientId, prescriptionId) =>
     sendPush: true,
   });
 
+/**
+ * Generic notification sender (for backward compatibility)
+ * @param {String} userId - Recipient user ID
+ * @param {String} type - Notification type
+ * @param {String} title - Notification title
+ * @param {String} message - Notification message
+ * @param {Object} data - Additional data
+ */
+const sendNotification = async (userId, type, title, message, data = {}) => {
+  try {
+    return await send({
+      recipient: userId,
+      type: type || 'general',
+      title,
+      message,
+      data,
+      sendPush: true,
+    });
+  } catch (error) {
+    logger.error('Send notification failed', { error: error.message, userId, type });
+    throw error;
+  }
+};
+
 const markAsRead = async (notificationId) => {
   await Notification.findByIdAndUpdate(notificationId, {
     isRead: true,
@@ -337,6 +361,7 @@ const sendLabTestRequestToAllLabs = async (bookingId, testDetails) => {
 
 export const notificationService = {
   send,
+  sendNotification,
   sendPush,
   sendSMS,
   sendBookingConfirmation,
