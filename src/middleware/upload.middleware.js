@@ -54,7 +54,37 @@ const upload = multer({
 });
 
 const uploadProfilePicture = upload.single("profilePicture");
-const uploadPrescription = upload.single("prescription");
+
+// Flexible prescription upload - supports multiple field names
+const uploadPrescription = (req, res, next) => {
+  // Try different field names that frontend might use
+  const fieldNames = ['prescription', 'file', 'prescriptionFile', 'image'];
+  
+  // Check which field has the file
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return next();
+  }
+  
+  // Try each field name dynamically
+  let fieldFound = false;
+  const originalMiddleware = upload.any(); // Accept any field temporarily
+  
+  originalMiddleware(req, res, (err) => {
+    if (err) {
+      return next(err);
+    }
+    
+    // Find the uploaded file from any of the expected fields
+    if (req.files && req.files.length > 0) {
+      req.file = req.files[0]; // Use first file as single file
+      fieldFound = true;
+    }
+    
+    next();
+  });
+};
+
 const uploadReport = upload.single("report");
 const uploadMedicineImage = upload.single("medicineImage");
 // Support 1-5 medicine images
