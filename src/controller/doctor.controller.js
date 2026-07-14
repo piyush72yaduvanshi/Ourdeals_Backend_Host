@@ -289,32 +289,10 @@ const uploadPrescriptionFile = async (req, res) => {
       bookingId,
       hasFile: !!req.file,
       fileName: req.file?.originalname,
-      fileType: req.file?.mimetype,
-      fileSize: req.file?.size,
     });
 
     if (!req.file) {
       return res.status(400).json(errorResponse('Prescription file is required'));
-    }
-
-    // Validate file type - only allow images and PDFs
-    const ALLOWED_TYPES = [
-      'application/pdf',
-      'image/jpeg',
-      'image/jpg',
-      'image/png',
-      'image/heic',
-      'image/heif'
-    ];
-    
-    if (!ALLOWED_TYPES.includes(req.file.mimetype)) {
-      return res.status(400).json(errorResponse('Invalid file type. Only PDF and images (JPG, PNG, HEIC) are allowed'));
-    }
-
-    // Validate file size - max 10MB
-    const MAX_SIZE = 10 * 1024 * 1024; // 10MB
-    if (req.file.size > MAX_SIZE) {
-      return res.status(400).json(errorResponse(`File too large. Maximum size is 10MB, received ${(req.file.size / 1024 / 1024).toFixed(2)}MB`));
     }
 
     // Get booking
@@ -362,9 +340,9 @@ const uploadPrescriptionFile = async (req, res) => {
       return res.status(403).json(errorResponse('Not authorized to upload prescription for this booking'));
     }
 
-    if (!['in_progress', 'accepted'].includes(bookingRecord.status)) {
+    if (!['in_progress', 'completed', 'accepted'].includes(bookingRecord.status)) {
       return res.status(400).json(
-        errorResponse(`Prescription can only be uploaded for accepted or in-progress bookings. Current status: ${bookingRecord.status}`)
+        errorResponse(`Booking must be accepted or in progress. Current status: ${bookingRecord.status}`)
       );
     }
 
@@ -431,19 +409,21 @@ const uploadPrescriptionFile = async (req, res) => {
     const patientId = bookingRecord.patient?._id || bookingRecord.patient;
     if (patientId) {
       try {
-        // Use proper notification method
-        await notificationService.sendPrescriptionAvailable(
-          patientId.toString(),
-          prescription._id.toString()
+        await notificationService.sendNotification(
+          patientId,
+          'PRESCRIPTION_READY',
+          'Prescription Ready',
+          'Your prescription is ready to download. Please check your booking details.',
+          {
+            bookingId: bookingId,
+            prescriptionId: prescription._id.toString(),
+            type: 'prescription',
+            action: 'view_booking',
+          }
         );
         console.log('📲 Notification sent to patient');
       } catch (notifError) {
         console.error('⚠️ Failed to send notification:', notifError.message);
-        logger.warn('Prescription notification failed', {
-          patientId,
-          prescriptionId: prescription._id,
-          error: notifError.message
-        });
         // Don't fail the upload if notification fails
       }
     }

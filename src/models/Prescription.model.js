@@ -1,4 +1,4 @@
-﻿import mongoose from 'mongoose';
+import mongoose from 'mongoose';
 
 const MedicineSchema = new mongoose.Schema({
   name: {
@@ -32,7 +32,6 @@ const PrescriptionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Booking',
     required: true,
-    unique: true, // Prevent duplicate prescriptions for same booking
     index: true,
   },
   patient: {

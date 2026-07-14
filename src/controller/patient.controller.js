@@ -210,15 +210,7 @@ const getActiveBookings = async (req, res) => {
 const getBookingDetails = async (req, res) => {
   try {
     const { id } = req.params;
-    const patientId = req.user.userId;
-    
     const booking = await bookingService.getBooking(id);
-    
-    // CRITICAL: Verify patient owns this booking
-    const bookingPatientId = (booking.patient?._id || booking.patient)?.toString();
-    if (bookingPatientId !== patientId) {
-      return res.status(403).json(errorResponse('You are not authorized to view this booking'));
-    }
 
     res.json(successResponse('Booking details fetched', booking));
   } catch (error) {
