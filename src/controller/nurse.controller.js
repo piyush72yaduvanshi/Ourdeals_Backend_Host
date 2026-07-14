@@ -8,7 +8,7 @@ const updateProfile = async (req, res) => {
     const nurseId = req.user.userId;
     const updates = req.body;
 
-    const nurse = await Nurse.findByIdAndUpdate(nurseId, updates, { new: true });
+    const nurse = await Nurse.findByIdAndUpdate(nurseId, updates, { returnDocument: 'after' });
 
     res.json(successResponse('Profile updated successfully', nurse));
   } catch (error) {

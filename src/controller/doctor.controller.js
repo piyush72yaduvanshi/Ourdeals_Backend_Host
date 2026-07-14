@@ -21,7 +21,7 @@ const updateProfile = async (req, res) => {
     DOCTOR_ALLOWED_FIELDS.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
 
     const doctor = await Doctor.findByIdAndUpdate(doctorId, updates, {
-      new: true,
+      returnDocument: 'after',
     });
 
     res.json(successResponse('Profile updated successfully', doctor));
@@ -38,7 +38,7 @@ const setAvailability = async (req, res) => {
     const doctor = await Doctor.findByIdAndUpdate(
       doctorId,
       { availability },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     res.json(successResponse('Availability updated', doctor));
@@ -305,14 +305,33 @@ const uploadPrescriptionFile = async (req, res) => {
     console.log('✅ Booking found:', bookingRecord.status);
 
     // Handle both Booking (provider) and RealTimeBooking (acceptedProvider) models
-    const providerId = bookingRecord.provider?.toString?.()
-      || bookingRecord.provider?._id?.toString?.()
-      || bookingRecord.acceptedProvider?.toString?.()
-      || bookingRecord.acceptedProvider?._id?.toString?.();
+    // Extract provider ID - handle both string and ObjectId cases
+    let providerId = null;
+    
+    if (bookingRecord.provider) {
+      // If provider exists, convert to string
+      if (typeof bookingRecord.provider === 'string') {
+        providerId = bookingRecord.provider;
+      } else if (bookingRecord.provider._id) {
+        providerId = bookingRecord.provider._id.toString();
+      } else {
+        providerId = bookingRecord.provider.toString();
+      }
+    } else if (bookingRecord.acceptedProvider) {
+      // Check acceptedProvider for RealTimeBooking
+      if (typeof bookingRecord.acceptedProvider === 'string') {
+        providerId = bookingRecord.acceptedProvider;
+      } else if (bookingRecord.acceptedProvider._id) {
+        providerId = bookingRecord.acceptedProvider._id.toString();
+      } else {
+        providerId = bookingRecord.acceptedProvider.toString();
+      }
+    }
     
     console.log('🔐 Authorization Check:', {
       doctorId,
       providerId,
+      providerType: typeof bookingRecord.provider,
       match: providerId === doctorId
     });
 
@@ -470,7 +489,7 @@ const updateLocation = async (req, res) => {
           coordinates: [longitude, latitude],
         },
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     res.json(successResponse('Location updated successfully', {
@@ -517,7 +536,7 @@ const markVideoCallCompleted = async (req, res) => {
     const updatedBooking = await Booking.findByIdAndUpdate(
       id,
       { videoCallCompleted: true },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     res.json(successResponse('Video call marked as completed', {
@@ -580,7 +599,7 @@ const scheduleAppointment = async (req, res) => {
     updatedBooking = await BookingModel.findByIdAndUpdate(
       id,
       { scheduledTime: timeToSave },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (!updatedBooking) {
@@ -589,7 +608,7 @@ const scheduleAppointment = async (req, res) => {
       updatedBooking = await RealTimeBookingModel.findByIdAndUpdate(
         id,
         { 'requirements.preferredTime': timeToSave, scheduledTime: timeToSave },
-        { new: true }
+        { returnDocument: 'after' }
       );
     }
 

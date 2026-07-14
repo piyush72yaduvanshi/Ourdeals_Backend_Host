@@ -13,18 +13,6 @@ const connectDatabase = async () => {
     // Set mongoose global options to suppress deprecation warnings
     mongoose.set('strictQuery', false);
     
-    // Configure default options for findOneAndUpdate/findByIdAndUpdate
-    // This fixes the "new: true" deprecation warning
-    mongoose.plugin((schema) => {
-      schema.pre(['findOneAndUpdate', 'findByIdAndUpdate'], function() {
-        // If 'new' option is set, use 'returnDocument' instead
-        if (this.options.new !== undefined) {
-          this.options.returnDocument = this.options.new ? 'after' : 'before';
-          delete this.options.new;
-        }
-      });
-    });
-    
     const options = {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
