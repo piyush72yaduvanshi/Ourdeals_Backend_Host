@@ -6,6 +6,7 @@
 import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger.util.js';
+import { formatForZoom } from '../utils/timezone.util.js';
 
 class ZoomService {
   constructor() {
@@ -89,11 +90,21 @@ class ZoomService {
 
       const token = await this.getAccessToken();
 
+      // Convert IST time to UTC for Zoom API
+      // Frontend sends IST time, Zoom expects UTC
+      const startTimeUTC = options.startTime ? formatForZoom(options.startTime) : undefined;
+
+      logger.info('Zoom meeting time conversion', {
+        receivedTime: options.startTime,
+        convertedUTC: startTimeUTC,
+      });
+
       const meetingData = {
         topic: options.topic || 'Healthcare Consultation',
         type: 2, // Scheduled meeting
+        start_time: startTimeUTC, // ISO 8601 format in UTC
         duration: options.duration || 30, // 30 minutes default
-        timezone: 'Asia/Kolkata',
+        timezone: 'UTC', // Always use UTC since we're converting time
         settings: {
           host_video: true,
           participant_video: true,

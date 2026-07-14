@@ -315,7 +315,8 @@ const uploadPrescriptionFile = async (req, res) => {
       );
     }
 
-    const prescriptionFileUrl = await s3Service.uploadFile(req.file, 'prescriptions', doctorId);
+    const uploadResult = await s3Service.uploadFile(req.file, 'prescriptions', doctorId);
+    const prescriptionFileUrl = s3Service.cleanS3Url(uploadResult.fileUrl);
 
     let prescription = await Prescription.findOne({ booking: bookingId });
     if (prescription) {

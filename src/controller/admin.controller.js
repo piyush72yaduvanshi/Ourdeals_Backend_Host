@@ -351,15 +351,21 @@ const createMedicine = async (req, res) => {
     // Handle multiple images (1-5) using S3
     if (req.files && req.files.length > 0) {
       try {
+        // Generate unique medicine ID for upload path
+        const tempMedicineId = 'med-' + Date.now();
+        
         // Upload all images to S3
         const imageUrls = await s3Service.uploadMultipleFiles(
           req.files, 
           'medicine-images', 
-          'temp-' + Date.now()
+          tempMedicineId
         );
         
-        // Map to get only the fileUrl string from the returned objects
-        const extractedUrls = imageUrls.map(img => img.fileUrl || img.fileName || img);
+        // Extract clean URLs and ensure they're cleaned
+        const extractedUrls = imageUrls.map(img => {
+          const url = img.fileUrl || img.fileName || img;
+          return s3Service.cleanS3Url(url);
+        });
         
         medicineData.images = extractedUrls;
         // Set first image as main imageUrl for backward compatibility
@@ -373,25 +379,6 @@ const createMedicine = async (req, res) => {
     }
 
     const medicine = await Medicine.create(medicineData);
-
-    // Update image paths with actual medicine ID
-    if (medicineData.images && medicineData.images.length > 0) {
-      const updatedImages = [];
-      for (const imageUrl of medicineData.images) {
-        if (imageUrl.includes('temp-')) {
-          // For S3 URLs, we need to re-upload with correct path
-          // For local files, just update the path
-          const newImageUrl = imageUrl.replace('temp-', medicine._id + '-');
-          updatedImages.push(newImageUrl);
-        } else {
-          updatedImages.push(imageUrl);
-        }
-      }
-      
-      medicine.images = updatedImages;
-      medicine.imageUrl = updatedImages[0];
-      await medicine.save();
-    }
 
     return res.status(201).json(
       successResponse('Medicine created successfully', medicine)
@@ -418,8 +405,11 @@ const updateMedicine = async (req, res) => {
           id
         );
         
-        // Map to get only the fileUrl string from the returned objects
-        const extractedNewUrls = newImages.map(img => img.fileUrl || img.fileName || img);
+        // Extract clean URLs
+        const extractedNewUrls = newImages.map(img => {
+          const url = img.fileUrl || img.fileName || img;
+          return s3Service.cleanS3Url(url);
+        });
         
         // If existingImages are provided, merge them with new images
         if (updateData.existingImages) {
@@ -442,10 +432,11 @@ const updateMedicine = async (req, res) => {
         );
       }
     } else if (updateData.existingImages) {
-      // Only existing images, no new uploads
-      updateData.images = Array.isArray(updateData.existingImages) 
+      // Only existing images, no new uploads - clean them
+      const existingImages = Array.isArray(updateData.existingImages) 
         ? updateData.existingImages 
         : [updateData.existingImages];
+      updateData.images = existingImages.map(url => s3Service.cleanS3Url(url));
       updateData.imageUrl = updateData.images[0];
       delete updateData.existingImages;
     }
