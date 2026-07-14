@@ -385,7 +385,7 @@ const updateStock = async (req, res) => {
     const medicine = await Medicine.findOneAndUpdate(
       { _id: id, pharmacist: pharmacistId },
       { stock },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (!medicine) {

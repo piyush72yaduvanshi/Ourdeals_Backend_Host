@@ -6,6 +6,7 @@ import { s3Service } from '../services/s3.service.js';
 import { successResponse, errorResponse, paginatedResponse } from '../utils/response.util.js';
 import { logger } from '../utils/logger.util.js';
 import { parseAsIST } from '../utils/timezone.util.js';
+import { notificationService } from '../services/notification.service.js';
 
 
 const DOCTOR_ALLOWED_FIELDS = [
@@ -403,6 +404,29 @@ const uploadPrescriptionFile = async (req, res) => {
       doctorId,
       prescriptionId: prescription._id,
     });
+
+    // Send notification to patient that prescription is ready
+    const patientId = bookingRecord.patient?._id || bookingRecord.patient;
+    if (patientId) {
+      try {
+        await notificationService.sendNotification(
+          patientId,
+          'PRESCRIPTION_READY',
+          'Prescription Ready',
+          'Your prescription is ready to download. Please check your booking details.',
+          {
+            bookingId: bookingId,
+            prescriptionId: prescription._id.toString(),
+            type: 'prescription',
+            action: 'view_booking',
+          }
+        );
+        console.log('📲 Notification sent to patient');
+      } catch (notifError) {
+        console.error('⚠️ Failed to send notification:', notifError.message);
+        // Don't fail the upload if notification fails
+      }
+    }
 
     res.status(201).json(successResponse('Prescription uploaded successfully', {
       prescriptionId: prescription._id,

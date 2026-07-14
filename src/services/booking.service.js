@@ -224,6 +224,7 @@ const getBooking = async (bookingId) => {
         booking = await RealTimeBooking.findById(bookingId)
           .populate('acceptedProvider', 'firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role')
           .populate('patient', 'firstName lastName phone')
+          .populate('prescription')
           .lean();
         
         if (booking) {
@@ -243,6 +244,16 @@ const getBooking = async (bookingId) => {
     if (booking.provider) {
       booking.doctorName = `${booking.provider.firstName} ${booking.provider.lastName}`;
       booking.doctorPhone = booking.provider.phone;
+    }
+
+    // Clean prescription file URL if present
+    if (booking.prescription && booking.prescription.prescriptionFile) {
+      try {
+        const url = new URL(booking.prescription.prescriptionFile);
+        booking.prescription.prescriptionFile = `${url.protocol}//${url.host}${url.pathname}`;
+      } catch (e) {
+        // If not a valid URL, keep as-is
+      }
     }
 
     return booking;
@@ -453,7 +464,7 @@ const acceptBooking = async (bookingId, providerId) => {
         }
       },
       {
-        new: true,
+        returnDocument: 'after',
         runValidators: true,
       }
     ).populate('provider patient');

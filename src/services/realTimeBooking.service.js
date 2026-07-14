@@ -256,7 +256,7 @@ const acceptBooking = async (bookingId, providerId) => {
           acceptedAt: new Date(),
         },
       },
-      { new: true }
+      { returnDocument: 'after' }
     ).populate("patient acceptedProvider");
 
     if (!booking) {

@@ -169,8 +169,8 @@ export const getPrescription = async (req, res) => {
 
     const prescription = await Prescription.findById(id)
       .populate('patient', 'firstName lastName email phone')
-      .populate('doctor', 'firstName lastName specialization')
-      .populate('booking');
+      .populate('doctor', 'firstName lastName specialization profilePicture')
+      .populate('booking', 'scheduledTime consultationType status');
 
     if (!prescription) {
       return res.status(404).json(errorResponse('Prescription not found'));
@@ -184,7 +184,18 @@ export const getPrescription = async (req, res) => {
       return res.status(403).json(errorResponse('Unauthorized access'));
     }
 
-    res.status(200).json(successResponse('Prescription retrieved', prescription));
+    // Clean prescription file URL (remove signed parameters)
+    const prescriptionData = prescription.toObject();
+    if (prescriptionData.prescriptionFile) {
+      try {
+        const url = new URL(prescriptionData.prescriptionFile);
+        prescriptionData.prescriptionFile = `${url.protocol}//${url.host}${url.pathname}`;
+      } catch (e) {
+        // If not a valid URL, keep as-is
+      }
+    }
+
+    res.status(200).json(successResponse('Prescription retrieved', prescriptionData));
   } catch (error) {
     logger.error('Get prescription failed', { error: error.message });
     res.status(400).json(errorResponse(error.message));
@@ -202,8 +213,8 @@ export const getPatientPrescriptions = async (req, res) => {
 
     const [prescriptions, total] = await Promise.all([
       Prescription.find({ patient: patientId })
-        .populate('doctor', 'firstName lastName specialization')
-        .populate('booking', 'scheduledTime consultationType')
+        .populate('doctor', 'firstName lastName specialization profilePicture')
+        .populate('booking', 'scheduledTime consultationType status')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(parseInt(limit))
@@ -211,8 +222,22 @@ export const getPatientPrescriptions = async (req, res) => {
       Prescription.countDocuments({ patient: patientId }),
     ]);
 
+    // Ensure prescription file URLs are clean (no signed parameters)
+    const cleanedPrescriptions = prescriptions.map(prescription => {
+      if (prescription.prescriptionFile) {
+        // Remove any query parameters from URL
+        try {
+          const url = new URL(prescription.prescriptionFile);
+          prescription.prescriptionFile = `${url.protocol}//${url.host}${url.pathname}`;
+        } catch (e) {
+          // If not a valid URL, keep as-is
+        }
+      }
+      return prescription;
+    });
+
     res.status(200).json(successResponse('Prescriptions retrieved', {
-      prescriptions,
+      prescriptions: cleanedPrescriptions,
       total,
       page: parseInt(page),
       pages: Math.ceil(total / limit),
