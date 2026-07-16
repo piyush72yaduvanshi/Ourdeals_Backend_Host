@@ -668,14 +668,24 @@ const getCallStatus = async (req, res) => {
     const { bookingId } = req.params;
     const userId = req.user.userId;
 
-    // Verify booking
+    // Verify booking and populate prescription
     let booking = await Booking.findById(bookingId)
-      .select('doctor_on_call patient_on_call consultation_ended consultation_ended_at status videoCallCompleted');
+      .select('doctor_on_call patient_on_call consultation_ended consultation_ended_at status videoCallCompleted prescription')
+      .populate({
+        path: 'prescription',
+        select: 'prescriptionFile diagnosis medicines advice notes followUpDate createdAt updatedAt',
+      })
+      .lean();
 
     if (!booking) {
       const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
       booking = await RealTimeBooking.findById(bookingId)
-        .select('doctor_on_call patient_on_call consultation_ended consultation_ended_at status videoCallCompleted acceptedProvider patient');
+        .select('doctor_on_call patient_on_call consultation_ended consultation_ended_at status videoCallCompleted acceptedProvider patient prescription')
+        .populate({
+          path: 'prescription',
+          select: 'prescriptionFile diagnosis medicines advice notes followUpDate createdAt updatedAt',
+        })
+        .lean();
       if (booking) {
         booking.provider = booking.acceptedProvider;
       }
@@ -685,7 +695,8 @@ const getCallStatus = async (req, res) => {
       return res.status(404).json(errorResponse('Booking not found'));
     }
 
-    res.json(successResponse('Call status fetched', {
+    // Build response
+    const response = {
       bookingId,
       doctor_on_call: booking.doctor_on_call || false,
       patient_on_call: booking.patient_on_call || false,
@@ -693,7 +704,28 @@ const getCallStatus = async (req, res) => {
       consultation_ended_at: booking.consultation_ended_at,
       status: booking.status,
       videoCallCompleted: booking.videoCallCompleted || false,
-    }));
+    };
+
+    // Add prescription data if available
+    if (booking.prescription) {
+      if (booking.prescription.prescriptionFile) {
+        try {
+          const url = new URL(booking.prescription.prescriptionFile);
+          const cleanUrl = `${url.protocol}//${url.host}${url.pathname}`;
+          response.prescriptionFileUrl = cleanUrl;
+        } catch (e) {
+          response.prescriptionFileUrl = booking.prescription.prescriptionFile;
+        }
+      }
+      response.hasPrescription = true;
+      response.prescriptionId = booking.prescription._id;
+    } else {
+      response.hasPrescription = false;
+      response.prescriptionFileUrl = null;
+      response.prescriptionId = null;
+    }
+
+    res.json(successResponse('Call status fetched', response));
   } catch (error) {
     logger.error('Get call status error', { error: error.message });
     res.status(500).json(errorResponse(error.message || 'Failed to get call status'));
