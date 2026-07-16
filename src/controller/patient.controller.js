@@ -6,6 +6,7 @@ import { realTimeBookingService } from '../services/realTimeBooking.service.js';
 import { RealTimeBooking } from '../models/RealTimeBooking.model.js';
 import { successResponse, errorResponse, paginatedResponse } from '../utils/response.util.js';
 import { ServiceType } from '../types/index.js';
+import { logger } from '../utils/logger.util.js';
 
 const getNearbyServices = async (req, res) => {
   try {
