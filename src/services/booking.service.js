@@ -215,7 +215,10 @@ const getBooking = async (bookingId) => {
     let booking = await Booking.findById(bookingId)
       .populate('provider', 'firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role')
       .populate('patient', 'firstName lastName phone')
-      .populate('prescription')
+      .populate({
+        path: 'prescription',
+        select: 'prescriptionFile diagnosis medicines advice notes followUpDate createdAt updatedAt',
+      })
       .lean();
 
     if (!booking) {
@@ -224,7 +227,10 @@ const getBooking = async (bookingId) => {
         booking = await RealTimeBooking.findById(bookingId)
           .populate('acceptedProvider', 'firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role')
           .populate('patient', 'firstName lastName phone')
-          .populate('prescription')
+          .populate({
+            path: 'prescription',
+            select: 'prescriptionFile diagnosis medicines advice notes followUpDate createdAt updatedAt',
+          })
           .lean();
         
         if (booking) {
@@ -246,14 +252,29 @@ const getBooking = async (bookingId) => {
       booking.doctorPhone = booking.provider.phone;
     }
 
-    // Clean prescription file URL if present
-    if (booking.prescription && booking.prescription.prescriptionFile) {
-      try {
-        const url = new URL(booking.prescription.prescriptionFile);
-        booking.prescription.prescriptionFile = `${url.protocol}//${url.host}${url.pathname}`;
-      } catch (e) {
-        // If not a valid URL, keep as-is
+    // Clean prescription file URL if present and add explicit field
+    if (booking.prescription) {
+      if (booking.prescription.prescriptionFile) {
+        try {
+          const url = new URL(booking.prescription.prescriptionFile);
+          const cleanUrl = `${url.protocol}//${url.host}${url.pathname}`;
+          booking.prescription.prescriptionFile = cleanUrl;
+          
+          // Add explicit prescriptionFileUrl field at booking level for easy access
+          booking.prescriptionFileUrl = cleanUrl;
+        } catch (e) {
+          // If not a valid URL, keep as-is
+          booking.prescriptionFileUrl = booking.prescription.prescriptionFile;
+        }
       }
+      
+      // Add prescription status flags for frontend
+      booking.hasPrescription = true;
+      booking.prescriptionId = booking.prescription._id;
+    } else {
+      booking.hasPrescription = false;
+      booking.prescriptionFileUrl = null;
+      booking.prescriptionId = null;
     }
 
     return booking;

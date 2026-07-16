@@ -32,7 +32,7 @@ const PrescriptionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Booking',
     required: true,
-    index: true,
+    unique: true,
   },
   patient: {
     type: mongoose.Schema.Types.ObjectId,
@@ -77,6 +77,5 @@ const PrescriptionSchema = new mongoose.Schema({
 // Indexes
 PrescriptionSchema.index({ patient: 1, createdAt: -1 });
 PrescriptionSchema.index({ doctor: 1, createdAt: -1 });
-PrescriptionSchema.index({ booking: 1 });
 
 export const Prescription = mongoose.model('Prescription', PrescriptionSchema);
