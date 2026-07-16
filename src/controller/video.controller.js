@@ -668,6 +668,12 @@ const getCallStatus = async (req, res) => {
     const { bookingId } = req.params;
     const userId = req.user.userId;
 
+    logger.info('\n════════════════════════════════════════════════════════');
+    logger.info('📹 VIDEO API: GET CALL STATUS');
+    logger.info('════════════════════════════════════════════════════════');
+    logger.info(`🔍 Booking ID: ${bookingId}`);
+    logger.info(`👤 User ID: ${userId}`);
+
     // Verify booking and populate prescription
     let booking = await Booking.findById(bookingId)
       .select('doctor_on_call patient_on_call consultation_ended consultation_ended_at status videoCallCompleted prescription')
@@ -676,6 +682,12 @@ const getCallStatus = async (req, res) => {
         select: 'prescriptionFile diagnosis medicines advice notes followUpDate createdAt updatedAt',
       })
       .lean();
+
+    if (booking) {
+      logger.info('✅ Found in Booking collection');
+    } else {
+      logger.info('⚠️  Not found in Booking, trying RealTimeBooking...');
+    }
 
     if (!booking) {
       const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
@@ -687,13 +699,19 @@ const getCallStatus = async (req, res) => {
         })
         .lean();
       if (booking) {
+        logger.info('✅ Found in RealTimeBooking collection');
         booking.provider = booking.acceptedProvider;
       }
     }
 
     if (!booking) {
+      logger.error('❌ Booking not found');
       return res.status(404).json(errorResponse('Booking not found'));
     }
+
+    logger.info(`📋 Booking Status: ${booking.status}`);
+    logger.info(`📹 Video Call Completed: ${booking.videoCallCompleted || false}`);
+    logger.info(`💊 Has Prescription: ${!!booking.prescription}`);
 
     // Build response
     const response = {
@@ -706,28 +724,64 @@ const getCallStatus = async (req, res) => {
       videoCallCompleted: booking.videoCallCompleted || false,
     };
 
+    logger.info('────────────────────────────────────────────────────────');
+    logger.info('💊 PRESCRIPTION PROCESSING');
+    logger.info('────────────────────────────────────────────────────────');
+
     // Add prescription data if available
     if (booking.prescription) {
+      logger.info('✅ Prescription exists');
+      logger.info(`   Prescription ID: ${booking.prescription._id}`);
+      
       if (booking.prescription.prescriptionFile) {
+        logger.info(`   Original URL: ${booking.prescription.prescriptionFile}`);
+        
         try {
           const url = new URL(booking.prescription.prescriptionFile);
           const cleanUrl = `${url.protocol}//${url.host}${url.pathname}`;
           response.prescriptionFileUrl = cleanUrl;
+          
+          logger.info(`   ✅ Clean URL: ${cleanUrl}`);
         } catch (e) {
           response.prescriptionFileUrl = booking.prescription.prescriptionFile;
+          logger.warn(`   ⚠️  URL parsing failed: ${e.message}`);
         }
+      } else {
+        logger.warn('   ⚠️  prescriptionFile is NULL');
       }
+      
       response.hasPrescription = true;
       response.prescriptionId = booking.prescription._id;
+      
+      logger.info('   Added to response:');
+      logger.info(`      - hasPrescription: true`);
+      logger.info(`      - prescriptionFileUrl: ${response.prescriptionFileUrl || 'NULL'}`);
+      logger.info(`      - prescriptionId: ${response.prescriptionId}`);
     } else {
+      logger.warn('❌ NO PRESCRIPTION for this booking');
       response.hasPrescription = false;
       response.prescriptionFileUrl = null;
       response.prescriptionId = null;
+      
+      logger.info('   Added to response:');
+      logger.info(`      - hasPrescription: false`);
+      logger.info(`      - prescriptionFileUrl: null`);
+      logger.info(`      - prescriptionId: null`);
     }
+
+    logger.info('════════════════════════════════════════════════════════');
+    logger.info('✅ SENDING CALL STATUS RESPONSE');
+    logger.info('════════════════════════════════════════════════════════\n');
 
     res.json(successResponse('Call status fetched', response));
   } catch (error) {
-    logger.error('Get call status error', { error: error.message });
+    logger.error('════════════════════════════════════════════════════════');
+    logger.error('❌ VIDEO API ERROR');
+    logger.error('════════════════════════════════════════════════════════');
+    logger.error(`Error: ${error.message}`);
+    logger.error(`Stack: ${error.stack}`);
+    logger.error('════════════════════════════════════════════════════════\n');
+    
     res.status(500).json(errorResponse(error.message || 'Failed to get call status'));
   }
 };

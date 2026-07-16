@@ -212,6 +212,11 @@ const createBooking = async (bookingData) => {
 
 const getBooking = async (bookingId) => {
   try {
+    logger.info('════════════════════════════════════════════════════════');
+    logger.info('📋 GET BOOKING SERVICE CALLED');
+    logger.info('════════════════════════════════════════════════════════');
+    logger.info(`🔍 Booking ID: ${bookingId}`);
+    
     let booking = await Booking.findById(bookingId)
       .populate('provider', 'firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role')
       .populate('patient', 'firstName lastName phone')
@@ -220,6 +225,14 @@ const getBooking = async (bookingId) => {
         select: 'prescriptionFile diagnosis medicines advice notes followUpDate createdAt updatedAt',
       })
       .lean();
+
+    if (booking) {
+      logger.info('✅ Found in Booking collection');
+      logger.info(`   Status: ${booking.status}`);
+      logger.info(`   Has prescription reference: ${!!booking.prescription}`);
+    } else {
+      logger.info('⚠️  Not found in Booking collection, trying RealTimeBooking...');
+    }
 
     if (!booking) {
       try {
@@ -234,14 +247,18 @@ const getBooking = async (bookingId) => {
           .lean();
         
         if (booking) {
+          logger.info('✅ Found in RealTimeBooking collection');
+          logger.info(`   Status: ${booking.status}`);
+          logger.info(`   Has prescription reference: ${!!booking.prescription}`);
           booking.provider = booking.acceptedProvider;
         }
       } catch (e) {
-        // ignore import error
+        logger.error('❌ Error loading RealTimeBooking:', e.message);
       }
     }
 
     if (!booking) {
+      logger.error('❌ Booking not found in any collection');
       const error = new Error('Booking not found');
       error.statusCode = 404;
       throw error;
@@ -250,11 +267,23 @@ const getBooking = async (bookingId) => {
     if (booking.provider) {
       booking.doctorName = `${booking.provider.firstName} ${booking.provider.lastName}`;
       booking.doctorPhone = booking.provider.phone;
+      logger.info(`👨‍⚕️ Doctor: ${booking.doctorName}`);
     }
+
+    logger.info('────────────────────────────────────────────────────────');
+    logger.info('💊 PRESCRIPTION PROCESSING');
+    logger.info('────────────────────────────────────────────────────────');
 
     // Clean prescription file URL if present and add explicit field
     if (booking.prescription) {
+      logger.info('✅ Prescription object exists');
+      logger.info(`   Prescription ID: ${booking.prescription._id}`);
+      logger.info(`   Diagnosis: ${booking.prescription.diagnosis || 'N/A'}`);
+      logger.info(`   Medicines count: ${booking.prescription.medicines?.length || 0}`);
+      
       if (booking.prescription.prescriptionFile) {
+        logger.info(`   Original URL: ${booking.prescription.prescriptionFile}`);
+        
         try {
           const url = new URL(booking.prescription.prescriptionFile);
           const cleanUrl = `${url.protocol}//${url.host}${url.pathname}`;
@@ -262,20 +291,41 @@ const getBooking = async (bookingId) => {
           
           // Add explicit prescriptionFileUrl field at booking level for easy access
           booking.prescriptionFileUrl = cleanUrl;
+          
+          logger.info(`   ✅ Clean URL: ${cleanUrl}`);
         } catch (e) {
           // If not a valid URL, keep as-is
           booking.prescriptionFileUrl = booking.prescription.prescriptionFile;
+          logger.warn(`   ⚠️  URL parsing failed, keeping as-is: ${e.message}`);
         }
+      } else {
+        logger.warn('   ⚠️  Prescription exists but prescriptionFile field is NULL');
       }
       
       // Add prescription status flags for frontend
       booking.hasPrescription = true;
       booking.prescriptionId = booking.prescription._id;
+      
+      logger.info('   ✅ Added explicit fields:');
+      logger.info(`      - hasPrescription: true`);
+      logger.info(`      - prescriptionId: ${booking.prescriptionId}`);
+      logger.info(`      - prescriptionFileUrl: ${booking.prescriptionFileUrl || 'NULL'}`);
     } else {
+      logger.warn('❌ NO PRESCRIPTION found for this booking');
       booking.hasPrescription = false;
       booking.prescriptionFileUrl = null;
       booking.prescriptionId = null;
+      
+      logger.info('   Set explicit fields:');
+      logger.info(`      - hasPrescription: false`);
+      logger.info(`      - prescriptionFileUrl: null`);
+      logger.info(`      - prescriptionId: null`);
     }
+
+    logger.info('════════════════════════════════════════════════════════');
+    logger.info('✅ GET BOOKING COMPLETED SUCCESSFULLY');
+    logger.info(`   Returning booking with ${booking.hasPrescription ? 'PRESCRIPTION' : 'NO PRESCRIPTION'}`);
+    logger.info('════════════════════════════════════════════════════════\n');
 
     return booking;
   } catch (error) {
@@ -334,7 +384,7 @@ const getUserBookings = async (userId, role, query = {}) => {
     ];
     
     if (RealTimeBooking) {
-      queries.push(RealTimeBooking.find(rtFilter).populate('acceptedProvider patient').lean());
+      queries.push(RealTimeBooking.find(rtFilter).populate('acceptedProvider patient prescription').lean());
     }
 
     const results = await Promise.all(queries);
@@ -359,11 +409,32 @@ const getUserBookings = async (userId, role, query = {}) => {
     const total = allBookings.length;
     const paginatedBookings = allBookings.slice((page - 1) * limit, page * limit);
 
-    // Format patient names in bookings list
+    // Format patient names in bookings list and add prescription fields
     const formattedBookings = paginatedBookings.map(booking => {
       if (booking.patient) {
         booking.patient.fullName = `${booking.patient.firstName || ''} ${booking.patient.lastName || ''}`.trim();
       }
+      
+      // Add prescription fields for easy frontend access
+      if (booking.prescription) {
+        if (booking.prescription.prescriptionFile) {
+          try {
+            const url = new URL(booking.prescription.prescriptionFile);
+            const cleanUrl = `${url.protocol}//${url.host}${url.pathname}`;
+            booking.prescription.prescriptionFile = cleanUrl;
+            booking.prescriptionFileUrl = cleanUrl;
+          } catch (e) {
+            booking.prescriptionFileUrl = booking.prescription.prescriptionFile;
+          }
+        }
+        booking.hasPrescription = true;
+        booking.prescriptionId = booking.prescription._id;
+      } else {
+        booking.hasPrescription = false;
+        booking.prescriptionFileUrl = null;
+        booking.prescriptionId = null;
+      }
+      
       return booking;
     });
 
@@ -391,11 +462,34 @@ const getActiveBookings = async (userId, role = 'patient') => {
     };
 
     const bookings = await Booking.find(filter)
-      .populate('provider patient')
+      .populate('provider patient prescription')
       .sort({ createdAt: -1 })
       .lean();
 
-    return bookings;
+    // Add prescription fields for easy frontend access
+    const formattedBookings = bookings.map(booking => {
+      if (booking.prescription) {
+        if (booking.prescription.prescriptionFile) {
+          try {
+            const url = new URL(booking.prescription.prescriptionFile);
+            const cleanUrl = `${url.protocol}//${url.host}${url.pathname}`;
+            booking.prescription.prescriptionFile = cleanUrl;
+            booking.prescriptionFileUrl = cleanUrl;
+          } catch (e) {
+            booking.prescriptionFileUrl = booking.prescription.prescriptionFile;
+          }
+        }
+        booking.hasPrescription = true;
+        booking.prescriptionId = booking.prescription._id;
+      } else {
+        booking.hasPrescription = false;
+        booking.prescriptionFileUrl = null;
+        booking.prescriptionId = null;
+      }
+      return booking;
+    });
+
+    return formattedBookings;
   } catch (error) {
     logger.error('Get active bookings failed', { error: error.message });
     throw error;

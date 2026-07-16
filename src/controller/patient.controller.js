@@ -210,10 +210,44 @@ const getActiveBookings = async (req, res) => {
 const getBookingDetails = async (req, res) => {
   try {
     const { id } = req.params;
+    
+    logger.info('\n════════════════════════════════════════════════════════');
+    logger.info('📱 PATIENT API: GET BOOKING DETAILS');
+    logger.info('════════════════════════════════════════════════════════');
+    logger.info(`🔍 Booking ID: ${id}`);
+    logger.info(`👤 Patient ID: ${req.user.userId}`);
+    
     const booking = await bookingService.getBooking(id);
+    
+    logger.info('────────────────────────────────────────────────────────');
+    logger.info('📤 PREPARING API RESPONSE');
+    logger.info('────────────────────────────────────────────────────────');
+    logger.info(`✅ Booking Status: ${booking.status}`);
+    logger.info(`✅ hasPrescription: ${booking.hasPrescription}`);
+    logger.info(`✅ prescriptionFileUrl: ${booking.prescriptionFileUrl || 'NULL'}`);
+    logger.info(`✅ prescriptionId: ${booking.prescriptionId || 'NULL'}`);
+    
+    if (booking.prescription) {
+      logger.info('✅ prescription object: EXISTS');
+      logger.info(`   - _id: ${booking.prescription._id}`);
+      logger.info(`   - prescriptionFile: ${booking.prescription.prescriptionFile || 'NULL'}`);
+    } else {
+      logger.info('❌ prescription object: NULL');
+    }
+    
+    logger.info('════════════════════════════════════════════════════════');
+    logger.info('✅ SENDING RESPONSE TO CLIENT');
+    logger.info('════════════════════════════════════════════════════════\n');
 
     res.json(successResponse('Booking details fetched', booking));
   } catch (error) {
+    logger.error('════════════════════════════════════════════════════════');
+    logger.error('❌ PATIENT API ERROR');
+    logger.error('════════════════════════════════════════════════════════');
+    logger.error(`Error: ${error.message}`);
+    logger.error(`Stack: ${error.stack}`);
+    logger.error('════════════════════════════════════════════════════════\n');
+    
     res.status(error.statusCode || 500)
       .json(errorResponse(error.message || 'Failed to fetch booking'));
   }
