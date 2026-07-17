@@ -216,8 +216,12 @@ const getBooking = async (bookingId) => {
     logger.info('📋 GET BOOKING SERVICE CALLED');
     logger.info('════════════════════════════════════════════════════════');
     logger.info(`🔍 Booking ID: ${bookingId}`);
+    logger.info(`⏰ Timestamp: ${new Date().toISOString()}`);
     
+    // IMPORTANT: Use read preference 'primary' for REAL-TIME fresh data
+    // This ensures we get the latest data instantly after prescription upload
     let booking = await Booking.findById(bookingId)
+      .read('primary') // Force read from PRIMARY database (no cache, no replica lag)
       .populate('provider', 'firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role')
       .populate('patient', 'firstName lastName phone')
       .populate({
@@ -238,6 +242,7 @@ const getBooking = async (bookingId) => {
       try {
         const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
         booking = await RealTimeBooking.findById(bookingId)
+          .read('primary') // Force read from PRIMARY database for INSTANT real-time data
           .populate('acceptedProvider', 'firstName lastName phone email gender specialization experience licenseNumber labName city state pincode profilePicture role')
           .populate('patient', 'firstName lastName phone')
           .populate({

@@ -662,6 +662,9 @@ const completeVideoConsultation = async (req, res) => {
 /**
  * Get real-time call status for a booking
  * GET /video/call-status/:bookingId
+ * 
+ * IMPORTANT: Always fetches fresh data from database (no caching)
+ * to ensure prescription updates are reflected immediately
  */
 const getCallStatus = async (req, res) => {
   try {
@@ -673,9 +676,12 @@ const getCallStatus = async (req, res) => {
     logger.info('════════════════════════════════════════════════════════');
     logger.info(`🔍 Booking ID: ${bookingId}`);
     logger.info(`👤 User ID: ${userId}`);
+    logger.info(`⏰ Timestamp: ${new Date().toISOString()}`);
 
-    // Verify booking and populate prescription
+    // IMPORTANT: Use read preference 'primary' for REAL-TIME fresh data
+    // This ensures we get the latest data instantly after prescription upload
     let booking = await Booking.findById(bookingId)
+      .read('primary') // Force read from PRIMARY database (no cache, no replica lag)
       .select('doctor_on_call patient_on_call consultation_ended consultation_ended_at status videoCallCompleted prescription')
       .populate({
         path: 'prescription',
@@ -692,6 +698,7 @@ const getCallStatus = async (req, res) => {
     if (!booking) {
       const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
       booking = await RealTimeBooking.findById(bookingId)
+        .read('primary') // Force read from PRIMARY database for INSTANT real-time data
         .select('doctor_on_call patient_on_call consultation_ended consultation_ended_at status videoCallCompleted acceptedProvider patient prescription')
         .populate({
           path: 'prescription',

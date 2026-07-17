@@ -7,6 +7,7 @@ import { successResponse, errorResponse, paginatedResponse } from '../utils/resp
 import { logger } from '../utils/logger.util.js';
 import { parseAsIST } from '../utils/timezone.util.js';
 import { notificationService } from '../services/notification.service.js';
+import redisClient from '../config/redis.js';
 
 
 const DOCTOR_ALLOWED_FIELDS = [
@@ -378,7 +379,7 @@ const uploadPrescriptionFile = async (req, res) => {
         notes: notes || undefined,
       });
 
-      // Update booking with prescription reference
+      // Update booking with prescription reference IMMEDIATELY
       console.log('🔄 Updating booking with prescription reference...');
       try {
         await Booking.findByIdAndUpdate(bookingId, {
@@ -395,6 +396,50 @@ const uploadPrescriptionFile = async (req, res) => {
         });
         console.log('✅ RealTimeBooking model updated');
       }
+    }
+
+    // CRITICAL: Also update prescription reference for existing prescriptions
+    if (prescription && !bookingRecord.prescription) {
+      console.log('🔄 Updating booking with prescription reference (existing prescription)...');
+      try {
+        await Booking.findByIdAndUpdate(bookingId, {
+          prescription: prescription._id,
+        });
+      } catch (err) {
+        const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+        await RealTimeBooking.findByIdAndUpdate(bookingId, {
+          prescription: prescription._id,
+        });
+      }
+      console.log('✅ Booking reference updated');
+    }
+
+    // CRITICAL: Invalidate Redis cache for INSTANT real-time updates
+    console.log('🗑️  Invalidating Redis cache for instant updates...');
+    try {
+      // Check if Redis is available and ready
+      if (redisClient && typeof redisClient.isReady !== 'undefined' && redisClient.isReady) {
+        // Clear booking cache so next API call gets fresh data
+        const cacheKeys = [
+          `booking:${bookingId}`,
+          `booking:details:${bookingId}`,
+          `user:bookings:${patientId}`,
+          `call:status:${bookingId}`,
+        ];
+        
+        for (const key of cacheKeys) {
+          await redisClient.del(key);
+          console.log(`   ✅ Cleared cache key: ${key}`);
+        }
+        
+        console.log('✅ Redis cache invalidated successfully');
+      } else {
+        console.log('⚠️  Redis not available, skipping cache invalidation (app will work normally)');
+      }
+    } catch (cacheError) {
+      console.error('⚠️  Failed to invalidate cache:', cacheError.message);
+      console.log('   ℹ️  Continuing without cache invalidation - functionality not affected');
+      // Don't fail upload if cache clear fails - app works fine without Redis
     }
 
     console.log('✅ Prescription uploaded successfully!');
@@ -425,6 +470,48 @@ const uploadPrescriptionFile = async (req, res) => {
       } catch (notifError) {
         console.error('⚠️ Failed to send notification:', notifError.message);
         // Don't fail the upload if notification fails
+      }
+
+      // Send real-time Socket.IO event for INSTANT update
+      try {
+        const { getSocketHandler } = await import('../socket/socket.handler.js');
+        const socketHandler = getSocketHandler();
+        
+        // Prepare complete prescription data for instant UI update
+        const prescriptionData = {
+          bookingId: bookingId,
+          prescriptionId: prescription._id.toString(),
+          prescriptionFileUrl: prescriptionFileUrl,
+          hasPrescription: true,
+          prescription: {
+            _id: prescription._id.toString(),
+            prescriptionFile: prescriptionFileUrl,
+            diagnosis: prescription.diagnosis,
+            medicines: prescription.medicines || [],
+            advice: prescription.advice,
+            notes: prescription.notes,
+            createdAt: prescription.createdAt,
+          },
+          uploadedAt: new Date().toISOString(),
+          message: 'Your prescription is ready to download',
+        };
+        
+        // Emit to patient IMMEDIATELY for real-time update
+        socketHandler.emitToUser(patientId.toString(), 'prescription:uploaded', prescriptionData);
+        
+        // Also emit generic event for call-status listeners
+        socketHandler.emitToUser(patientId.toString(), 'booking:updated', {
+          bookingId: bookingId,
+          type: 'prescription_uploaded',
+          data: prescriptionData,
+        });
+        
+        console.log('🔔 Real-time socket events sent to patient:', patientId.toString());
+        console.log('   Event 1: prescription:uploaded');
+        console.log('   Event 2: booking:updated');
+      } catch (socketError) {
+        console.error('⚠️ Failed to send socket event:', socketError.message);
+        // Don't fail the upload if socket fails
       }
     }
 
