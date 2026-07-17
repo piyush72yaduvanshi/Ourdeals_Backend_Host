@@ -55,6 +55,13 @@ connectDatabase()
     initializeSocket(server);
     console.log("Socket.io initialized");
 
+    // Initialize auto-fix for unlinked prescriptions (PERMANENT FIX)
+    import("./utils/autofix-prescriptions.util.js")
+      .then(({ scheduleAutofixPrescriptions }) => {
+        scheduleAutofixPrescriptions();
+      })
+      .catch((err) => console.error("Failed to init auto-fix prescriptions", err));
+
     // Initialize S3
     import("./services/s3.service.js")
       .then(({ s3Service }) => {
