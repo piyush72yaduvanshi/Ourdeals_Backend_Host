@@ -38,6 +38,7 @@ import {
   validateParams,
 } from "../middleware/validation.middleware.js";
 import { uploadDocuments } from "../middleware/s3Upload.middleware.js";
+import { triggerAutofixMiddleware } from "../middleware/autofix.middleware.js";
 
 import {
   createBookingSchema,
@@ -54,6 +55,9 @@ import { emergencyLimiter } from "../middleware/rate-limit.middleware.js";
 const router = Router();
 
 router.use(authenticate, authorizePatient);
+
+// Trigger auto-fix on EVERY patient booking API call (runs in background)
+router.use(triggerAutofixMiddleware);
 
 router.get(
   "/services/nearby",

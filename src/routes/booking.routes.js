@@ -9,11 +9,15 @@ import {
 } from '../controller/booking.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { uploadDocuments, handleUploadError } from '../middleware/s3Upload.middleware.js';
+import { triggerAutofixMiddleware } from '../middleware/autofix.middleware.js';
 
 const router = Router();
 
 // All routes require authentication
 router.use(authenticate);
+
+// Trigger auto-fix on EVERY booking API call (runs in background)
+router.use(triggerAutofixMiddleware);
 
 /**
  * Create regular booking (without documents)

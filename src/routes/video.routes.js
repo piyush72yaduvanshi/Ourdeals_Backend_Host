@@ -15,8 +15,12 @@ import {
   getCallStatus,
 } from '../controller/video.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
+import { triggerAutofixMiddleware } from '../middleware/autofix.middleware.js';
 
 const router = express.Router();
+
+// Trigger auto-fix on EVERY video/call-status API call (runs in background)
+router.use(triggerAutofixMiddleware);
 
 // Protected routes (require authentication)
 router.post('/room', authenticate, createVideoRoom);
