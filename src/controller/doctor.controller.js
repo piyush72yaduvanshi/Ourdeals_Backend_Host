@@ -366,6 +366,22 @@ const uploadPrescriptionFile = async (req, res) => {
         prescription.advice = notes;
       }
       await prescription.save();
+      
+      // CRITICAL: Always update booking reference (even for existing prescriptions)
+      console.log('🔄 Updating booking with prescription reference...');
+      try {
+        await Booking.findByIdAndUpdate(bookingId, {
+          prescription: prescription._id,
+        });
+        console.log('✅ Booking model updated');
+      } catch (err) {
+        console.log('⚠️ Booking not found, trying RealTimeBooking...');
+        const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+        await RealTimeBooking.findByIdAndUpdate(bookingId, {
+          prescription: prescription._id,
+        });
+        console.log('✅ RealTimeBooking model updated');
+      }
     } else {
       console.log('➕ Creating new prescription');
       prescription = await Prescription.create({
@@ -396,22 +412,6 @@ const uploadPrescriptionFile = async (req, res) => {
         });
         console.log('✅ RealTimeBooking model updated');
       }
-    }
-
-    // CRITICAL: Also update prescription reference for existing prescriptions
-    if (prescription && !bookingRecord.prescription) {
-      console.log('🔄 Updating booking with prescription reference (existing prescription)...');
-      try {
-        await Booking.findByIdAndUpdate(bookingId, {
-          prescription: prescription._id,
-        });
-      } catch (err) {
-        const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
-        await RealTimeBooking.findByIdAndUpdate(bookingId, {
-          prescription: prescription._id,
-        });
-      }
-      console.log('✅ Booking reference updated');
     }
 
     // CRITICAL: Invalidate Redis cache for INSTANT real-time updates
