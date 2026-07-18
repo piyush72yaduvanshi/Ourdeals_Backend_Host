@@ -342,4 +342,76 @@ export const s3Service = {
   cleanS3Url,
   uploadDocuments,
   cleanupTempFiles,
+  deleteFolderContents,
+  deleteFileByUrl,
 };
+
+/**
+ * Delete all files in a folder/prefix in S3
+ * @param {String} prefix - Folder prefix (e.g., 'profile-pictures/userId')
+ */
+async function deleteFolderContents(prefix) {
+  if (!USE_S3) {
+    logger.info('S3 disabled, skipping folder deletion');
+    return;
+  }
+
+  try {
+    const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+    
+    // List all objects with the prefix
+    const listCommand = new ListObjectsV2Command({
+      Bucket: BUCKET_NAME,
+      Prefix: prefix,
+    });
+
+    const listResponse = await s3Client.send(listCommand);
+    
+    if (!listResponse.Contents || listResponse.Contents.length === 0) {
+      logger.info(`No files found in ${prefix}`);
+      return;
+    }
+
+    // Delete all objects
+    for (const object of listResponse.Contents) {
+      const deleteCommand = new DeleteObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: object.Key,
+      });
+      await s3Client.send(deleteCommand);
+      logger.info(`Deleted S3 file: ${object.Key}`);
+    }
+
+    logger.info(`Deleted ${listResponse.Contents.length} files from ${prefix}`);
+  } catch (error) {
+    logger.error(`Failed to delete folder ${prefix}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Delete file by URL
+ * @param {String} fileUrl - Full S3 URL
+ */
+async function deleteFileByUrl(fileUrl) {
+  if (!USE_S3) {
+    return;
+  }
+
+  try {
+    // Extract key from URL
+    const url = new URL(fileUrl);
+    const key = url.pathname.substring(1); // Remove leading slash
+
+    const deleteCommand = new DeleteObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+    });
+
+    await s3Client.send(deleteCommand);
+    logger.info(`Deleted S3 file by URL: ${key}`);
+  } catch (error) {
+    logger.error(`Failed to delete file ${fileUrl}:`, error.message);
+    throw error;
+  }
+}

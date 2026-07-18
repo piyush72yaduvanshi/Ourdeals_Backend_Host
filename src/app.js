@@ -19,7 +19,8 @@ import paymentRouter from "./routes/payment.routes.js";
 import prescriptionRouter from "./routes/prescription.routes.js";
 import bookingRouter from "./routes/booking.routes.js";
 import medicineRouter from "./routes/medicine.routes.js";
-import videoRoom from "./routes/video.routes.js"
+import videoRoom from "./routes/video.routes.js";
+import accountRouter from "./routes/account.routes.js";
 import {
   errorHandler,
   notFoundHandler,
@@ -229,7 +230,8 @@ app.use("/api/v1/payments", paymentRouter);
 app.use("/api/v1/bookings", bookingRouter);
 app.use("/api/v1", prescriptionRouter);
 app.use("/api/v1/medicines", medicineRouter);
-app.use("/api/v1/video",videoRoom)
+app.use("/api/v1/video", videoRoom);
+app.use("/api/v1/account", accountRouter); // Account deletion APIs
 
 app.get("/hello", (req, res) => {
   res.json({

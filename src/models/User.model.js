@@ -157,6 +157,20 @@ const userSchema = new mongoose.Schema(
       type: Date,
       select: false,
     },
+
+    // ACCOUNT DELETION
+    deletionRequested: {
+      type: Boolean,
+      default: false,
+    },
+    deletionToken: {
+      type: String,
+      select: false,
+    },
+    deletionTokenExpiry: {
+      type: Date,
+      select: false,
+    },
   },
   {
     timestamps: true,
