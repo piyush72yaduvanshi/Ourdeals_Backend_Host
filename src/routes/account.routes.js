@@ -38,7 +38,7 @@ router.post('/confirm-deletion', confirmAccountDeletion);
  * Body: { confirmPassword: string }
  * USE WITH CAUTION - No recovery possible
  */
-router.delete('/', deleteAccountImmediately);
+router.delete('/delete', deleteAccountImmediately);
 
 /**
  * Get account deletion status

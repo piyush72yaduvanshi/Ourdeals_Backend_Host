@@ -83,7 +83,7 @@ export const deleteAccountImmediately = async (req, res) => {
       return res.status(404).json(errorResponse('User not found'));
     }
 
-    const isPasswordValid = await user.comparePassword(confirmPassword);
+    const isPasswordValid = await user.isPasswordCorrect(confirmPassword);
     if (!isPasswordValid) {
       return res.status(401).json(errorResponse('Invalid password'));
     }
