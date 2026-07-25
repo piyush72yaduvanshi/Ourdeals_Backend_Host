@@ -4,28 +4,148 @@ import { logger } from "../utils/logger.util.js";
 import { addNotificationToQueue } from "../queue/notification.queue.js";
 import { NOTIFICATION_TYPES } from "../utils/notificationTemplates.js";
 import { sendPushNotification } from "./firebase.service.js";
+import { smsService } from "./sms.service.js";
+import { emailService } from "./email.service.js";
 
 export const NotificationType = {
   BOOKING_CONFIRMATION: "booking_confirmation",
   BOOKING_ACCEPTED: "booking_accepted",
+  BOOKING_UPDATE: "booking_update",
+  BOOKING_REQUEST: "booking_request",
   PROVIDER_ARRIVING: "provider_arriving",
   EMERGENCY_TRIGGERED: "emergency_triggered",
   PRESCRIPTION_UPLOADED: "prescription_uploaded",
+  PRESCRIPTION_AVAILABLE: "prescription_available",
+  PRESCRIPTION_READY: "prescription_ready",
   REPORT_READY: "report_ready",
+  COLLECTION_SCHEDULED: "collection_scheduled",
+  MEETING_CREATED: "meeting_created",
+  MEETING_REMINDER: "meeting_reminder",
   MEDICINE_ORDER_REQUEST: "medicine_order_request",
+  NURSE_REQUEST: "nurse_request",
+  LAB_TEST_REQUEST: "lab_test_request",
+  REGISTRATION_SUCCESSFUL: "registration_successful",
+  GENERAL: "general",
+  SYSTEM: "system",
+  PAYMENT: "payment",
+  EMERGENCY: "emergency",
+  REMINDER: "reminder",
+};
+
+/**
+ * Send email to a user — enqueue via SQS or fall back to direct delivery
+ */
+const sendEmailToUser = async (userId, template, templateData) => {
+  try {
+    const user = await User.findById(userId).select("email firstName lastName");
+    if (!user || !user.email) {
+      logger.info(`No email found for user ${userId}`);
+      return;
+    }
+
+    const data = {
+      to: user.email,
+      template,
+      templateData: {
+        name: `${user.firstName} ${user.lastName}`.trim() || "User",
+        ...templateData,
+      },
+    };
+
+    const sqsRes = await addNotificationToQueue(NOTIFICATION_TYPES.EMAIL, data);
+    if (!sqsRes) {
+      // SQS disabled — deliver email directly
+      switch (template) {
+        case "WELCOME":
+          await emailService.sendWelcomeEmail(data.to, data.templateData.name, templateData.role);
+          break;
+        case "PASSWORD_RESET":
+          await emailService.sendPasswordResetEmail(data.to, data.templateData.name, templateData.resetToken);
+          break;
+        case "BOOKING_CONFIRMATION":
+          await emailService.sendBookingConfirmationEmail(data.to, data.templateData.name, templateData);
+          break;
+        case "PAYMENT_CONFIRMATION":
+          await emailService.sendPaymentConfirmationEmail(data.to, data.templateData.name, templateData);
+          break;
+        case "ACCOUNT_DELETION":
+          await emailService.sendAccountDeletionEmail(data.to, data.templateData.name, templateData.confirmationLink);
+          break;
+        case "MEETING_REMINDER":
+          await emailService.sendMeetingReminderEmail(data.to, data.templateData.name, templateData);
+          break;
+        default:
+          logger.warn(`sendEmailToUser: unknown template ${template}`);
+      }
+      logger.info(`Direct email sent to user ${userId}`);
+    } else {
+      logger.info(`Email enqueued for user ${userId} (template: ${template})`);
+    }
+  } catch (error) {
+    logger.error("Failed to send email to user", { error: error.message, userId, template });
+  }
+};
+
+// Cache socket handler reference after first successful retrieval
+let _socketHandler = null;
+
+const emitSocketNotification = (recipientId, notification) => {
+  try {
+    if (!_socketHandler) {
+      // Lazy import — socket handler may not be initialized at module load time
+      import("../socket/socket.handler.js").then(({ getSocketHandler }) => {
+        try {
+          _socketHandler = getSocketHandler();
+          _socketHandler.emitToUser(recipientId.toString(), "notification:new", {
+            _id: notification._id,
+            type: notification.type,
+            title: notification.title,
+            message: notification.message,
+            data: notification.data,
+            isRead: false,
+            createdAt: notification.createdAt || new Date(),
+          });
+        } catch (err) {
+          // Socket not initialized yet — this is fine during startup
+        }
+      }).catch(() => {
+        // Module import failed — socket not available
+      });
+      return;
+    }
+
+    _socketHandler.emitToUser(recipientId.toString(), "notification:new", {
+      _id: notification._id,
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      data: notification.data,
+      isRead: false,
+      createdAt: notification.createdAt || new Date(),
+    });
+  } catch (error) {
+    // Socket emission is best-effort — don't break notification flow
+    logger.warn("Socket notification emission failed", { error: error.message });
+  }
 };
 
 const send = async (notificationData) => {
   try {
-    await Notification.create({
+    // 1. Save to database (In-App notification)
+    const notification = await Notification.create({
       recipient: notificationData.recipient,
       sender: notificationData.sender,
       type: notificationData.type,
       title: notificationData.title,
       message: notificationData.message,
       data: notificationData.data,
+      isSent: true, // Mark as sent since we're actively delivering it
     });
 
+    // 2. Emit real-time Socket.IO event for instant in-app delivery
+    emitSocketNotification(notificationData.recipient, notification);
+
+    // 3. Send push notification (AWS SNS)
     if (notificationData.sendPush !== false) {
       await sendPush(
         notificationData.recipient,
@@ -35,14 +155,30 @@ const send = async (notificationData) => {
       );
     }
 
+    // 4. Send SMS (AWS SNS)
     if (notificationData.sendSMS === true) {
-      await sendSMS(notificationData.recipient, notificationData.message);
+      await sendSMSToUser(notificationData.recipient, notificationData.message);
     }
 
-    logger.info(`Notification sent to user ${notificationData.recipient}`);
+    // 5. Send Email (AWS SES)
+    if (notificationData.sendEmail === true && notificationData.emailTemplate) {
+      await sendEmailToUser(
+        notificationData.recipient,
+        notificationData.emailTemplate,
+        notificationData.emailData || {}
+      );
+    }
+
+    logger.info(`Notification sent to user ${notificationData.recipient}`, {
+      type: notificationData.type,
+      push: notificationData.sendPush !== false,
+      sms: notificationData.sendSMS === true,
+    });
   } catch (error) {
     logger.error("Failed to send notification", {
       error: error.message,
+      type: notificationData.type,
+      recipient: notificationData.recipient,
     });
   }
 };
@@ -57,7 +193,7 @@ const sendPush = async (userId, title, message, data = {}) => {
     });
 
     if (!sqsRes) {
-      // SQS disabled, deliver push directly via Firebase/AWS SNS to user device tokens!
+      // SQS disabled, deliver push directly via AWS SNS to user device tokens
       const user = await User.findById(userId).select("deviceTokens");
       if (user && user.deviceTokens && user.deviceTokens.length > 0) {
         await sendPushNotification(user.deviceTokens, title, message, data);
@@ -75,16 +211,33 @@ const sendPush = async (userId, title, message, data = {}) => {
   }
 };
 
-const sendSMS = async (userId, message) => {
+/**
+ * Send SMS to a user — with SQS queue support and direct delivery fallback
+ * (mirrors the push notification pattern for consistency)
+ */
+const sendSMSToUser = async (userId, message) => {
   try {
-    await addNotificationToQueue(NOTIFICATION_TYPES.SMS, {
+    const sqsRes = await addNotificationToQueue(NOTIFICATION_TYPES.SMS, {
       userId,
       message,
     });
-    logger.info(`SMS enqueued for user ${userId}`);
+
+    if (!sqsRes) {
+      // SQS disabled — deliver SMS directly via AWS SNS
+      const user = await User.findById(userId).select("phone");
+      if (user && user.phone) {
+        await smsService.sendSMS(user.phone, message);
+        logger.info(`Direct SMS sent to user ${userId}`);
+      } else {
+        logger.info(`No phone number found for user ${userId}`);
+      }
+    } else {
+      logger.info(`SMS enqueued for user ${userId}`);
+    }
   } catch (error) {
-    logger.error("Failed to enqueue SMS", {
+    logger.error("Failed to send SMS", {
       error: error.message,
+      userId,
     });
   }
 };
@@ -92,12 +245,12 @@ const sendSMS = async (userId, message) => {
 const formatServiceTitle = (serviceType, baseTitle) => {
   if (!serviceType) return baseTitle;
   const s = serviceType.toLowerCase();
-  if (s.contains ? s.contains('doctor') : s.includes('doctor')) return `Doctor Consultation - ${baseTitle}`;
-  if (s.contains ? s.contains('nurse') : s.includes('nurse')) return `Nurse Service - ${baseTitle}`;
-  if (s.contains ? s.contains('ambulance') : s.includes('ambulance')) return `Ambulance Service - ${baseTitle}`;
-  if (s.contains ? s.contains('pharma') : s.includes('pharma') || s.includes('medicine')) return `Medicine Order - ${baseTitle}`;
-  if (s.contains ? s.contains('lab') : s.includes('lab') || s.includes('pathology')) return `Lab Test - ${baseTitle}`;
-  if (s.contains ? s.contains('blood') : s.includes('blood')) return `Blood Bank - ${baseTitle}`;
+  if (s.includes('doctor')) return `Doctor Consultation - ${baseTitle}`;
+  if (s.includes('nurse')) return `Nurse Service - ${baseTitle}`;
+  if (s.includes('ambulance')) return `Ambulance Service - ${baseTitle}`;
+  if (s.includes('pharma') || s.includes('medicine')) return `Medicine Order - ${baseTitle}`;
+  if (s.includes('lab') || s.includes('pathology')) return `Lab Test - ${baseTitle}`;
+  if (s.includes('blood')) return `Blood Bank - ${baseTitle}`;
   return baseTitle;
 };
 
@@ -174,7 +327,7 @@ const sendCollectionScheduled = async (patientId, labId, collectionTime) =>
   send({
     recipient: patientId,
     sender: labId,
-    type: "collection_scheduled",
+    type: NotificationType.COLLECTION_SCHEDULED,
     title: "Sample Collection Scheduled",
     message: `Your sample collection has been scheduled for ${new Date(collectionTime).toLocaleDateString()} at ${new Date(collectionTime).toLocaleTimeString()}.`,
     data: { 
@@ -187,7 +340,7 @@ const sendCollectionScheduled = async (patientId, labId, collectionTime) =>
 const sendBookingCompleted = async (patientId, bookingId) =>
   send({
     recipient: patientId,
-    type: "booking_update",
+    type: NotificationType.BOOKING_UPDATE,
     title: "Booking Completed",
     message: "Your booking has been completed. Thank you!",
     data: { bookingId },
@@ -197,7 +350,7 @@ const sendBookingCompleted = async (patientId, bookingId) =>
 const sendBookingCancelled = async (userId, bookingId, reason) =>
   send({
     recipient: userId,
-    type: "booking_update",
+    type: NotificationType.BOOKING_UPDATE,
     title: "Booking Cancelled",
     message: reason
       ? `Booking cancelled: ${reason}`
@@ -209,7 +362,7 @@ const sendBookingCancelled = async (userId, bookingId, reason) =>
 const sendMeetingReminder = async (userId, meetingDetails) =>
   send({
     recipient: userId,
-    type: "meeting_reminder",
+    type: NotificationType.MEETING_REMINDER,
     title: "Meeting Starting Soon",
     message: `Your video consultation is starting in 15 minutes. Click to join.`,
     data: {
@@ -219,12 +372,19 @@ const sendMeetingReminder = async (userId, meetingDetails) =>
     },
     sendPush: true,
     sendSMS: true,
+    sendEmail: true,
+    emailTemplate: "MEETING_REMINDER",
+    emailData: {
+      bookingId: meetingDetails.bookingId,
+      meetingLink: meetingDetails.meetingLink,
+      scheduledTime: meetingDetails.scheduledTime,
+    },
   });
 
 const sendPrescriptionAvailable = async (patientId, prescriptionId) =>
   send({
     recipient: patientId,
-    type: "prescription_available",
+    type: NotificationType.PRESCRIPTION_AVAILABLE,
     title: "Prescription Available",
     message: "Your doctor has uploaded your prescription. You can now view and download it.",
     data: { prescriptionId },
@@ -270,17 +430,6 @@ const markAllAsRead = async (userId) => {
 };
 
 const getUserNotifications = async (userId, page = 1, limit = 20) => {
-  // Auto-delete notifications older than 24 hours (1 day)
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  try {
-    await Notification.deleteMany({
-      recipient: userId,
-      createdAt: { $lt: oneDayAgo }
-    });
-  } catch (cleanErr) {
-    logger.error('Failed to auto-clean old notifications', { error: cleanErr.message });
-  }
-
   const skip = (page - 1) * limit;
 
   const [notifications, total] = await Promise.all([
@@ -297,19 +446,28 @@ const getUserNotifications = async (userId, page = 1, limit = 20) => {
 };
 
 const getUnreadCount = async (userId) => {
-  // Auto-delete notifications older than 24 hours (1 day)
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  try {
-    await Notification.deleteMany({
-      recipient: userId,
-      createdAt: { $lt: oneDayAgo }
-    });
-  } catch (cleanErr) {}
-
   return Notification.countDocuments({
     recipient: userId,
     isRead: false,
   });
+};
+
+/**
+ * Cleanup old notifications (called by cron service)
+ * Deletes notifications older than 24 hours
+ */
+const cleanupOldNotifications = async () => {
+  try {
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const result = await Notification.deleteMany({
+      createdAt: { $lt: oneDayAgo },
+    });
+    if (result.deletedCount > 0) {
+      logger.info(`Cleaned up ${result.deletedCount} old notifications`);
+    }
+  } catch (error) {
+    logger.error('Failed to cleanup old notifications', { error: error.message });
+  }
 };
 
 const sendMedicineOrderToAllPharmacists = async (bookingId, orderDetails) => {
@@ -357,7 +515,7 @@ const sendNurseRequestToAllNurses = async (bookingId, requestDetails) => {
     const notificationPromises = nurses.map(nurse =>
       send({
         recipient: nurse._id,
-        type: 'nurse_request',
+        type: NotificationType.NURSE_REQUEST,
         title: 'New Nursing Service Request',
         message: `New nursing service request: ${requestDetails.serviceType} for ${requestDetails.duration} day(s) - ₹${requestDetails.totalAmount}`,
         data: { 
@@ -390,7 +548,7 @@ const sendLabTestRequestToAllLabs = async (bookingId, testDetails) => {
     const notificationPromises = labs.map(lab =>
       send({
         recipient: lab._id,
-        type: 'lab_test_request',
+        type: NotificationType.LAB_TEST_REQUEST,
         title: 'New Lab Test Request',
         message: `New lab test request: ${testDetails.testCount} test(s) - Total: ₹${testDetails.totalAmount}`,
         data: { 
@@ -414,8 +572,9 @@ const sendLabTestRequestToAllLabs = async (bookingId, testDetails) => {
 export const notificationService = {
   send,
   sendNotification,
+  sendEmail: sendEmailToUser,
   sendPush,
-  sendSMS,
+  sendSMS: sendSMSToUser,
   sendBookingConfirmation,
   sendBookingAccepted,
   sendProviderArriving,
@@ -434,4 +593,5 @@ export const notificationService = {
   markAllAsRead,
   getUserNotifications,
   getUnreadCount,
+  cleanupOldNotifications,
 };

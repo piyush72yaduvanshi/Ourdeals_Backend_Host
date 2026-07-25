@@ -4,6 +4,7 @@ import { NOTIFICATION_TYPES } from "../utils/notificationTemplates.js";
 import { User } from "../models/User.model.js";
 import { pushNotificationService } from "../services/firebase.service.js";
 import { smsService } from "../services/sms.service.js";
+import { emailService } from "../services/email.service.js";
 import { logger } from "../utils/logger.util.js";
 
 let sqsClient = null;
@@ -53,11 +54,65 @@ const processMessage = async (message) => {
     logger.info(`[SQS Worker] Processing message type: ${type}`);
 
     switch (type) {
+
+      // ─── EMAIL ────────────────────────────────────────────────────────────
       case NOTIFICATION_TYPES.EMAIL:
-        logger.info(`[SQS Worker] Sending EMAIL to ${data.email}: ${data.subject}`);
-        // Implement email service here
+        try {
+          const { to, subject, htmlBody, textBody, template, templateData } = data;
+
+          if (!to) {
+            logger.warn("[SQS Worker] EMAIL skipped — no recipient address");
+            break;
+          }
+
+          // Handle template-based emails
+          if (template && templateData) {
+            switch (template) {
+              case "WELCOME":
+                await emailService.sendWelcomeEmail(to, templateData.name, templateData.role);
+                break;
+              case "PASSWORD_RESET":
+                await emailService.sendPasswordResetEmail(to, templateData.name, templateData.resetToken);
+                break;
+              case "BOOKING_CONFIRMATION":
+                await emailService.sendBookingConfirmationEmail(to, templateData.name, templateData);
+                break;
+              case "PAYMENT_CONFIRMATION":
+                await emailService.sendPaymentConfirmationEmail(to, templateData.name, templateData);
+                break;
+              case "ACCOUNT_DELETION":
+                await emailService.sendAccountDeletionEmail(to, templateData.name, templateData.confirmationLink);
+                break;
+              case "MEETING_REMINDER":
+                await emailService.sendMeetingReminderEmail(to, templateData.name, templateData);
+                break;
+              case "OTP":
+                await emailService.sendOTPEmail(to, templateData.name, templateData.otp, templateData.purpose);
+                break;
+              default:
+                // Fallback: send raw email
+                if (subject && htmlBody) {
+                  await emailService.sendEmail(to, subject, htmlBody, textBody);
+                } else {
+                  logger.warn(`[SQS Worker] EMAIL unknown template: ${template}`);
+                }
+            }
+          } else if (subject && htmlBody) {
+            // Raw email (no template)
+            await emailService.sendEmail(to, subject, htmlBody, textBody);
+          } else {
+            logger.warn("[SQS Worker] EMAIL skipped — missing subject or body", { to });
+            break;
+          }
+
+          logger.info(`[SQS Worker] EMAIL sent to ${to}`);
+        } catch (err) {
+          logger.error(`[SQS Worker] EMAIL failed: ${err.message}`, { to: data?.to });
+          throw err;
+        }
         break;
 
+      // ─── PUSH ─────────────────────────────────────────────────────────────
       case NOTIFICATION_TYPES.PUSH:
         try {
           const { userId, title, message: pushMessage, data: pushData } = data;
@@ -80,6 +135,7 @@ const processMessage = async (message) => {
         }
         break;
 
+      // ─── SMS ──────────────────────────────────────────────────────────────
       case NOTIFICATION_TYPES.SMS:
         try {
           const { userId, message: smsMessage } = data;
@@ -134,9 +190,9 @@ const pollMessages = async () => {
   try {
     const params = {
       QueueUrl: queueUrl,
-      MaxNumberOfMessages: 10, // Process up to 10 messages at once
+      MaxNumberOfMessages: 10,
       WaitTimeSeconds: 20, // Long polling
-      VisibilityTimeout: 30, // 30 seconds to process
+      VisibilityTimeout: 30,
     };
 
     const command = new ReceiveMessageCommand(params);

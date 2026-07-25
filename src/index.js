@@ -97,6 +97,13 @@ connectDatabase()
       })
       .catch((err) => console.error("Failed to init SMS", err));
 
+    // Initialize AWS SES for Email
+    import("./services/email.service.js")
+      .then(({ emailService }) => {
+        emailService.initializeEmail();
+      })
+      .catch((err) => console.error("Failed to init Email (SES)", err));
+
     server.listen(PORT, () => {
       console.log(`Server is running on port http://localhost:${PORT}`);
 

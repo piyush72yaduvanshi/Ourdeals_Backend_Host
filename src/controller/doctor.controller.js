@@ -456,7 +456,7 @@ const uploadPrescriptionFile = async (req, res) => {
       try {
         await notificationService.sendNotification(
           patientId,
-          'PRESCRIPTION_READY',
+          'prescription_ready',
           'Prescription Ready',
           'Your prescription is ready to download. Please check your booking details.',
           {

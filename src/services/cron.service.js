@@ -13,7 +13,24 @@ class CronService {
       await this.sendMeetingReminders();
     });
 
-    logger.info('Cron jobs started');
+    // Run daily at 3 AM to cleanup old notifications (older than 24 hours)
+    cron.schedule('0 3 * * *', async () => {
+      await this.cleanupOldNotifications();
+    });
+
+    logger.info('Cron jobs started (meeting reminders + notification cleanup)');
+  }
+
+  /**
+   * Cleanup notifications older than 24 hours
+   * Moved here from getUserNotifications/getUnreadCount to avoid running on every API call
+   */
+  async cleanupOldNotifications() {
+    try {
+      await notificationService.cleanupOldNotifications();
+    } catch (error) {
+      logger.error('Notification cleanup cron failed', { error: error.message });
+    }
   }
 
   /**
