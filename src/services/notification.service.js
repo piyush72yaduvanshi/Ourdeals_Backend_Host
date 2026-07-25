@@ -1,8 +1,9 @@
-﻿import { Notification } from "../models/Notification.model.js";
+import { Notification } from "../models/Notification.model.js";
 import { User } from "../models/User.model.js";
 import { logger } from "../utils/logger.util.js";
 import { addNotificationToQueue } from "../queue/notification.queue.js";
 import { NOTIFICATION_TYPES } from "../utils/notificationTemplates.js";
+import { sendPushNotification } from "./firebase.service.js";
 
 export const NotificationType = {
   BOOKING_CONFIRMATION: "booking_confirmation",
@@ -48,15 +49,27 @@ const send = async (notificationData) => {
 
 const sendPush = async (userId, title, message, data = {}) => {
   try {
-    await addNotificationToQueue(NOTIFICATION_TYPES.PUSH, {
+    const sqsRes = await addNotificationToQueue(NOTIFICATION_TYPES.PUSH, {
       userId,
       title,
       message,
       data,
     });
-    logger.info(`Push notification enqueued for user ${userId}`);
+
+    if (!sqsRes) {
+      // SQS disabled, deliver push directly via Firebase/AWS SNS to user device tokens!
+      const user = await User.findById(userId).select("deviceTokens");
+      if (user && user.deviceTokens && user.deviceTokens.length > 0) {
+        await sendPushNotification(user.deviceTokens, title, message, data);
+        logger.info(`Direct push notification sent to user ${userId}`);
+      } else {
+        logger.info(`No registered device tokens found for user ${userId}`);
+      }
+    } else {
+      logger.info(`Push notification enqueued for user ${userId}`);
+    }
   } catch (error) {
-    logger.error("Failed to enqueue push notification", {
+    logger.error("Failed to send push notification", {
       error: error.message,
     });
   }
@@ -76,26 +89,44 @@ const sendSMS = async (userId, message) => {
   }
 };
 
-const sendBookingConfirmation = async (patientId, bookingDetails) =>
-  send({
+const formatServiceTitle = (serviceType, baseTitle) => {
+  if (!serviceType) return baseTitle;
+  const s = serviceType.toLowerCase();
+  if (s.contains ? s.contains('doctor') : s.includes('doctor')) return `Doctor Consultation - ${baseTitle}`;
+  if (s.contains ? s.contains('nurse') : s.includes('nurse')) return `Nurse Service - ${baseTitle}`;
+  if (s.contains ? s.contains('ambulance') : s.includes('ambulance')) return `Ambulance Service - ${baseTitle}`;
+  if (s.contains ? s.contains('pharma') : s.includes('pharma') || s.includes('medicine')) return `Medicine Order - ${baseTitle}`;
+  if (s.contains ? s.contains('lab') : s.includes('lab') || s.includes('pathology')) return `Lab Test - ${baseTitle}`;
+  if (s.contains ? s.contains('blood') : s.includes('blood')) return `Blood Bank - ${baseTitle}`;
+  return baseTitle;
+};
+
+const sendBookingConfirmation = async (patientId, bookingDetails) => {
+  const serviceType = bookingDetails.serviceType || 'general';
+  const displayTitle = formatServiceTitle(serviceType, 'Booking Created');
+  return send({
     recipient: patientId,
     type: NotificationType.BOOKING_CONFIRMATION,
-    title: "Booking Confirmed",
-    message: `Your booking for ${bookingDetails.serviceType} has been confirmed.`,
-    data: { bookingId: bookingDetails.id },
+    title: displayTitle,
+    message: `Your ${serviceType} booking has been created and sent to nearby providers.`,
+    data: { bookingId: bookingDetails.id, serviceType },
     sendPush: true,
   });
+};
 
-const sendBookingAccepted = async (patientId, providerId, bookingDetails) =>
-  send({
+const sendBookingAccepted = async (patientId, providerId, bookingDetails) => {
+  const serviceType = bookingDetails.serviceType || 'general';
+  const displayTitle = formatServiceTitle(serviceType, 'Booking Accepted');
+  return send({
     recipient: patientId,
     sender: providerId,
     type: NotificationType.BOOKING_ACCEPTED,
-    title: "Booking Accepted",
-    message: "Your booking has been accepted by the provider.",
-    data: { bookingId: bookingDetails.id },
+    title: displayTitle,
+    message: `Your ${serviceType} booking request has been accepted.`,
+    data: { bookingId: bookingDetails.id, serviceType },
     sendPush: true,
   });
+};
 
 const sendProviderArriving = async (patientId, providerId, eta) =>
   send({
@@ -239,6 +270,17 @@ const markAllAsRead = async (userId) => {
 };
 
 const getUserNotifications = async (userId, page = 1, limit = 20) => {
+  // Auto-delete notifications older than 24 hours (1 day)
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  try {
+    await Notification.deleteMany({
+      recipient: userId,
+      createdAt: { $lt: oneDayAgo }
+    });
+  } catch (cleanErr) {
+    logger.error('Failed to auto-clean old notifications', { error: cleanErr.message });
+  }
+
   const skip = (page - 1) * limit;
 
   const [notifications, total] = await Promise.all([
@@ -254,11 +296,21 @@ const getUserNotifications = async (userId, page = 1, limit = 20) => {
   return { notifications, total };
 };
 
-const getUnreadCount = async (userId) =>
-  Notification.countDocuments({
+const getUnreadCount = async (userId) => {
+  // Auto-delete notifications older than 24 hours (1 day)
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  try {
+    await Notification.deleteMany({
+      recipient: userId,
+      createdAt: { $lt: oneDayAgo }
+    });
+  } catch (cleanErr) {}
+
+  return Notification.countDocuments({
     recipient: userId,
     isRead: false,
   });
+};
 
 const sendMedicineOrderToAllPharmacists = async (bookingId, orderDetails) => {
   try {

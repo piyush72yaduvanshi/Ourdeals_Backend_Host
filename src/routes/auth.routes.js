@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import { authController } from "../controller/auth.controller.js";
 import { validate } from "../middleware/validation.middleware.js";
 import { registerSchema, loginSchema } from "../validators/schemas.js";
@@ -28,6 +28,10 @@ router.post("/change-password", authenticate, authController.changePassword);
 router.post("/forgot-password", authLimiter, authController.forgotPassword);
 router.post("/reset-password", authLimiter, authController.resetPassword);
 router.post("/device-token", authenticate, authController.updateDeviceToken);
+router.get("/notifications", authenticate, authController.getNotifications);
+router.get("/notifications/unread-count", authenticate, authController.getUnreadCount);
+router.post("/notifications/read-all", authenticate, authController.markAllNotificationsRead);
+router.post("/notifications/:id/read", authenticate, authController.markNotificationRead);
 router.put("/profile", authenticate, uploadProfilePicture, authController.updateProfile);
 router.delete("/profile/picture", authenticate, authController.deleteProfilePicture);
 

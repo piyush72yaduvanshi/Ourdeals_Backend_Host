@@ -1,4 +1,4 @@
-﻿import { SNSClient, PublishCommand, CreatePlatformEndpointCommand } from "@aws-sdk/client-sns";
+import { SNSClient, PublishCommand, CreatePlatformEndpointCommand } from "@aws-sdk/client-sns";
 import { envConfig } from "../config/env.config.js";
 import { logger } from "../utils/logger.util.js";
 
@@ -10,7 +10,8 @@ const initializePushNotifications = () => {
   if (initialized) return;
 
   try {
-    const { region, accessKeyId, secretAccessKey, snsPlatformApplicationArn } = envConfig.aws;
+    const { region, accessKeyId, secretAccessKey, sns } = envConfig.aws;
+    const snsPlatformApplicationArn = sns?.platformApplicationArn || process.env.AWS_SNS_PLATFORM_APPLICATION_ARN;
 
     if (!region || !accessKeyId || !secretAccessKey) {
       logger.warn("AWS SNS credentials not configured. Push notifications disabled.");
@@ -160,6 +161,13 @@ const sendToTopic = async (topic, title, message, data = {}) => {
   } catch (error) {
     logger.error("Topic push failed", { error: error.message });
   }
+};
+
+export {
+  initializePushNotifications,
+  sendPushNotification,
+  registerDeviceToken,
+  sendToTopic,
 };
 
 export const pushNotificationService = {

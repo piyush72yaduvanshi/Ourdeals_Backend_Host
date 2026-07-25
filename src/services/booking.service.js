@@ -181,6 +181,20 @@ const createBooking = async (bookingData) => {
         { serviceType: booking.serviceType, id: booking._id }
       );
 
+      // Notify Provider (Doctor / Nurse / Ambulance / Lab / Bloodbank)
+      if (booking.provider && booking.provider._id) {
+        const patientName = booking.patient
+          ? `${booking.patient.firstName || ''} ${booking.patient.lastName || ''}`.trim()
+          : 'A patient';
+        await notificationService.sendNotification(
+          booking.provider._id,
+          'booking_request',
+          'New Booking Request',
+          `You have a new ${booking.serviceType || 'service'} request from ${patientName}.`,
+          { bookingId: booking._id.toString(), serviceType: booking.serviceType }
+        );
+      }
+
       // If it's a medicine/pharmacist order, notify all pharmacists
       if (booking.serviceType === 'pharmacist' || booking.serviceType === 'pharmacy') {
         const orderDetails = {
@@ -702,7 +716,24 @@ const updateBookingStatus = async (bookingId, providerId, status, additionalData
         );
         break;
       case 'in_progress':
-
+        if (booking.patient && booking.patient._id) {
+          await notificationService.sendNotification(
+            booking.patient._id,
+            'consultation_started',
+            'Consultation / Service Started',
+            `Your ${booking.serviceType || 'consultation'} session has started. Tap to view details.`,
+            { bookingId: booking._id.toString() }
+          );
+        }
+        if (booking.provider && booking.provider._id) {
+          await notificationService.sendNotification(
+            booking.provider._id,
+            'consultation_started',
+            'Consultation / Service Started',
+            `Your ${booking.serviceType || 'consultation'} session with patient has started.`,
+            { bookingId: booking._id.toString() }
+          );
+        }
         break;
       case 'completed':
         await notificationService.sendBookingCompleted(

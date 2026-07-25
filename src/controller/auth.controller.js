@@ -1,8 +1,10 @@
 import { authService } from '../services/auth.service.js';
 import { s3Service } from '../services/s3.service.js';
+import { pushNotificationService } from '../services/firebase.service.js';
+import { notificationService } from '../services/notification.service.js';
 import { User } from '../models/User.model.js';
 import { validatePassword } from '../utils/password.util.js';
-import { successResponse, errorResponse } from '../utils/response.util.js';
+import { successResponse, errorResponse, paginatedResponse } from '../utils/response.util.js';
 import { logger } from '../utils/logger.util.js';
 
 const getPlatform = (req) => {
@@ -94,6 +96,18 @@ const register = async (req, res) => {
       profilePicture,
       documents,
     });
+
+    // Send Welcome / Registration Confirmation Notification
+    try {
+      await notificationService.sendNotification(
+        user._id,
+        'registration_successful',
+        'Registration Successful',
+        `Welcome to OnMint Healthcare, ${user.firstName || 'User'}! Your ${user.role || 'account'} registration was submitted successfully.`
+      );
+    } catch (notifErr) {
+      logger.error('Failed to send registration notification', { error: notifErr.message });
+    }
 
     // The files are already safely stored in S3/locally under unique temporary folders.
     // No need to rename them to user._id as it breaks S3 URLs and causes broken links.
@@ -367,11 +381,11 @@ const resetPassword = async (req, res) => {
 
 const updateDeviceToken = async (req, res) => {
   try {
-    const { deviceToken } = req.body;
+    const { deviceToken, platform } = req.body;
 
     if (!deviceToken) {
       return res.json(
-        successResponse('No device token provided (web client)')
+        successResponse('No device token provided')
       );
     }
 
@@ -380,8 +394,21 @@ const updateDeviceToken = async (req, res) => {
       return res.status(404).json(errorResponse('User not found'));
     }
 
-    if (!user.deviceTokens.includes(deviceToken)) {
-      user.deviceTokens.push(deviceToken);
+    let targetToken = deviceToken;
+
+    try {
+      if (pushNotificationService) {
+        const endpointArn = await pushNotificationService.registerDeviceToken(deviceToken, platform || "GCM");
+        if (endpointArn) {
+          targetToken = endpointArn;
+        }
+      }
+    } catch (snsErr) {
+      logger.warn('AWS SNS token registration skipped/failed, using raw token', { error: snsErr.message });
+    }
+
+    if (!user.deviceTokens.includes(targetToken)) {
+      user.deviceTokens.push(targetToken);
       await user.save();
     }
 
@@ -474,6 +501,56 @@ const deleteProfilePicture = async (req, res) => {
   }
 };
 
+const getNotifications = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const { notifications, total } = await notificationService.getUserNotifications(userId, page, limit);
+
+    return res.json(
+      paginatedResponse('Notifications fetched successfully', notifications, page, limit, total)
+    );
+  } catch (error) {
+    logger.error('Failed to fetch notifications', { error: error.message });
+    return res.status(500).json(errorResponse('Failed to fetch notifications'));
+  }
+};
+
+const markNotificationRead = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await notificationService.markAsRead(id);
+    return res.json(successResponse('Notification marked as read'));
+  } catch (error) {
+    logger.error('Failed to mark notification read', { error: error.message });
+    return res.status(500).json(errorResponse('Failed to mark notification read'));
+  }
+};
+
+const markAllNotificationsRead = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    await notificationService.markAllAsRead(userId);
+    return res.json(successResponse('All notifications marked as read'));
+  } catch (error) {
+    logger.error('Failed to mark all notifications read', { error: error.message });
+    return res.status(500).json(errorResponse('Failed to mark all notifications read'));
+  }
+};
+
+const getUnreadCount = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const count = await notificationService.getUnreadCount(userId);
+    return res.json(successResponse('Unread count fetched', { unreadCount: count }));
+  } catch (error) {
+    logger.error('Failed to get unread count', { error: error.message });
+    return res.status(500).json(errorResponse('Failed to get unread count'));
+  }
+};
+
 export const authController = {
   register,
   login,
@@ -487,4 +564,8 @@ export const authController = {
   updateDeviceToken,
   updateProfile,
   deleteProfilePicture,
+  getNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+  getUnreadCount,
 };
