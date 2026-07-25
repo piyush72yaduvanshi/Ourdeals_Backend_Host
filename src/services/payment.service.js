@@ -77,6 +77,41 @@ class PaymentService {
       booking.amount = booking.price;
       booking.commission = commission;
       booking.vendorAmount = vendorAmount;
+
+      // Create Zoom meeting for video call bookings during auto-confirmation
+      const isVideoCall = booking.consultationType && ['video-call', 'VIDEO_CALL'].includes(String(booking.consultationType));
+      if (booking.serviceType === 'doctor' && isVideoCall && !booking.zoomMeetingId && !booking.meetingId) {
+        try {
+          const doctorName = booking.provider ? `${booking.provider.firstName || ''} ${booking.provider.lastName || ''}`.trim() : 'Doctor';
+          const meeting = await zoomService.createMeeting({
+            topic: `Consultation with Dr. ${doctorName}`,
+            startTime: booking.scheduledTime,
+            duration: booking.duration || 30,
+            agenda: booking.notes || 'Medical consultation',
+          });
+
+          booking.meetingLink = meeting.join_url || meeting.meetingLink;
+          booking.meetingId = String(meeting.id || meeting.meetingId);
+          booking.meetingPassword = meeting.password || meeting.meetingPassword || '';
+          booking.hostLink = meeting.start_url || meeting.hostLink;
+
+          booking.zoomMeetingId = booking.meetingId;
+          booking.zoomMeetingPassword = booking.meetingPassword;
+          booking.zoomJoinUrl = booking.meetingLink;
+          booking.zoomHostStartUrl = booking.hostLink;
+
+          logger.info('Zoom meeting created during createOrder auto-confirm', sanitizeForLog({
+            bookingId,
+            meetingId: booking.meetingId,
+          }));
+        } catch (zoomErr) {
+          logger.error('Failed to create Zoom meeting in createOrder', sanitizeForLog({
+            bookingId,
+            error: zoomErr.message,
+          }));
+        }
+      }
+
       await booking.save();
 
       logger.info('Booking auto-confirmed without payment', sanitizeForLog({
@@ -124,9 +159,14 @@ class PaymentService {
         throw new Error('Booking not found');
       }
 
-      if (booking.paymentStatus === 'paid') {
-        await session.abortTransaction();
-        throw new Error('Payment already verified for this booking');
+      if (booking.paymentStatus === 'paid' && (booking.meetingId || booking.zoomMeetingId)) {
+        await session.commitTransaction();
+        return {
+          bookingId,
+          paymentStatus: 'paid',
+          status: booking.status,
+          message: 'Payment already verified and meeting ready',
+        };
       }
 
       // PAYMENT DISABLED - Direct confirmation
@@ -135,24 +175,34 @@ class PaymentService {
 
       // FIXED: Create Zoom meeting BEFORE committing transaction
       let meetingCreated = false;
-      if (booking.serviceType === 'doctor' && booking.consultationType === 'VIDEO_CALL') {
+      const isVideoCall = booking.consultationType && ['video-call', 'VIDEO_CALL'].includes(String(booking.consultationType));
+      if (booking.serviceType === 'doctor' && isVideoCall) {
         try {
+          const doctorName = booking.provider ? `${booking.provider.firstName || ''} ${booking.provider.lastName || ''}`.trim() : 'Doctor';
           const meeting = await zoomService.createMeeting({
-            topic: `Consultation with Dr. ${booking.provider.firstName} ${booking.provider.lastName}`,
+            topic: `Consultation with Dr. ${doctorName}`,
             startTime: booking.scheduledTime,
             duration: booking.duration || 30,
             agenda: booking.notes || 'Medical consultation',
           });
 
-          booking.meetingLink = meeting.meetingLink;
-          booking.meetingId = meeting.meetingId;
-          booking.meetingPassword = meeting.meetingPassword;
-          booking.hostLink = meeting.hostLink;
+          // Set generic fields
+          booking.meetingLink = meeting.join_url || meeting.meetingLink;
+          booking.meetingId = String(meeting.id || meeting.meetingId);
+          booking.meetingPassword = meeting.password || meeting.meetingPassword || '';
+          booking.hostLink = meeting.start_url || meeting.hostLink;
+
+          // Set zoom-specific fields for video.controller.js compatibility
+          booking.zoomMeetingId = booking.meetingId;
+          booking.zoomMeetingPassword = booking.meetingPassword;
+          booking.zoomJoinUrl = booking.meetingLink;
+          booking.zoomHostStartUrl = booking.hostLink;
+
           meetingCreated = true;
 
           logger.info('Zoom meeting created before transaction commit', sanitizeForLog({
             bookingId,
-            meetingId: meeting.meetingId,
+            meetingId: booking.meetingId,
           }));
         } catch (zoomError) {
           logger.error('Zoom creation failed - aborting transaction', sanitizeForLog({

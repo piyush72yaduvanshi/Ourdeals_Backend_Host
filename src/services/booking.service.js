@@ -607,6 +607,35 @@ const acceptBooking = async (bookingId, providerId) => {
       throw new Error('Booking not found, already accepted by another provider, or not available');
     }
 
+    // Auto-create Zoom meeting if missing for doctor video calls
+    const isVideoCall = updatedBooking.consultationType && ['video-call', 'VIDEO_CALL'].includes(String(updatedBooking.consultationType));
+    if (updatedBooking.serviceType === 'doctor' && isVideoCall && !updatedBooking.zoomMeetingId && !updatedBooking.meetingId) {
+      try {
+        const { zoomService } = await import('./zoom.service.js');
+        const doctorName = updatedBooking.provider ? `${updatedBooking.provider.firstName || ''} ${updatedBooking.provider.lastName || ''}`.trim() : 'Doctor';
+        const meeting = await zoomService.createMeeting({
+          topic: `Consultation with Dr. ${doctorName}`,
+          startTime: updatedBooking.scheduledTime,
+          duration: updatedBooking.duration || 30,
+          agenda: updatedBooking.notes || 'Medical consultation',
+        });
+
+        updatedBooking.meetingLink = meeting.join_url || meeting.meetingLink;
+        updatedBooking.meetingId = String(meeting.id || meeting.meetingId);
+        updatedBooking.meetingPassword = meeting.password || meeting.meetingPassword || '';
+        updatedBooking.hostLink = meeting.start_url || meeting.hostLink;
+
+        updatedBooking.zoomMeetingId = updatedBooking.meetingId;
+        updatedBooking.zoomMeetingPassword = updatedBooking.meetingPassword;
+        updatedBooking.zoomJoinUrl = updatedBooking.meetingLink;
+        updatedBooking.zoomHostStartUrl = updatedBooking.hostLink;
+
+        await updatedBooking.save();
+      } catch (zoomErr) {
+        logger.warn('Could not auto-create Zoom meeting on acceptBooking:', zoomErr.message);
+      }
+    }
+
     // Send notification after successful acceptance
     try {
       await notificationService.sendBookingAccepted(

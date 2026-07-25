@@ -75,6 +75,16 @@ export const convertUTCtoIST = (utcTime) => {
  * Output: 2024-01-15T09:00:00Z (UTC)
  */
 export const formatForZoom = (istTime) => {
+  if (!istTime) return undefined;
+  
+  if (istTime instanceof Date) {
+    return istTime.toISOString();
+  }
+  
+  if (typeof istTime === 'string' && hasTimezoneInfo(istTime)) {
+    return new Date(istTime).toISOString();
+  }
+  
   const utcDate = convertISTtoUTC(istTime);
   return utcDate.toISOString();
 };

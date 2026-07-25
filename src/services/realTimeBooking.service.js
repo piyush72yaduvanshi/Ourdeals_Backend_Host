@@ -274,7 +274,35 @@ const acceptBooking = async (bookingId, providerId) => {
       }
       const error = new Error("Order expired");
       error.status = 410;
-      throw error;
+    }
+
+    // Auto-create Zoom meeting if missing for doctor video calls
+    const isVideoCall = booking.consultationType && ['video-call', 'VIDEO_CALL'].includes(String(booking.consultationType));
+    if ((booking.serviceType === 'doctor' || booking.consultationType) && isVideoCall && !booking.zoomMeetingId && !booking.meetingId) {
+      try {
+        const { zoomService } = await import('./zoom.service.js');
+        const doctorName = booking.acceptedProvider ? `${booking.acceptedProvider.firstName || ''} ${booking.acceptedProvider.lastName || ''}`.trim() : 'Doctor';
+        const meeting = await zoomService.createMeeting({
+          topic: `Consultation with Dr. ${doctorName}`,
+          startTime: booking.scheduledTime,
+          duration: booking.duration || 30,
+          agenda: booking.notes || 'Medical consultation',
+        });
+
+        booking.meetingLink = meeting.join_url || meeting.meetingLink;
+        booking.meetingId = String(meeting.id || meeting.meetingId);
+        booking.meetingPassword = meeting.password || meeting.meetingPassword || '';
+        booking.hostLink = meeting.start_url || meeting.hostLink;
+
+        booking.zoomMeetingId = booking.meetingId;
+        booking.zoomMeetingPassword = booking.meetingPassword;
+        booking.zoomJoinUrl = booking.meetingLink;
+        booking.zoomHostStartUrl = booking.hostLink;
+
+        await booking.save();
+      } catch (zoomErr) {
+        logger.warn('Could not auto-create Zoom meeting on realTime acceptBooking:', zoomErr.message);
+      }
     }
 
     const socketHandler = getSocketHandler();

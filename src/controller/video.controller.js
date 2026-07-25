@@ -58,8 +58,8 @@ const createVideoRoom = async (req, res) => {
 
     // Skip consultationType validation/conversion as all doctors support video
 
-    // Check booking status - allow requested (auto-accept), accepted, and in_progress
-    if (!['requested', 'accepted', 'in_progress'].includes(booking.status)) {
+    // Check booking status - allow requested (auto-accept), accepted, confirmed, paid, and in_progress
+    if (!['requested', 'accepted', 'confirmed', 'paid', 'in_progress'].includes(booking.status)) {
       return res.status(400).json(errorResponse('Consultation not ready. Status: ' + booking.status));
     }
 
@@ -71,31 +71,54 @@ const createVideoRoom = async (req, res) => {
 
     // Create or get existing Zoom meeting
     let session;
-    if (booking.zoomMeetingId) {
+    const existingMeetingId = booking.zoomMeetingId || booking.meetingId;
+    if (existingMeetingId) {
       // Meeting already exists, generate new tokens
       const role = isProvider ? 1 : 0; // 1 for host (doctor), 0 for participant (patient)
-      const token = zoomService.generateSDKJWT(booking.zoomMeetingId, role);
+      const token = zoomService.generateSDKJWT(existingMeetingId, role);
       
       session = {
-        meetingId: booking.zoomMeetingId,
-        meetingPassword: booking.zoomMeetingPassword,
+        meetingId: existingMeetingId,
+        meetingPassword: booking.zoomMeetingPassword || booking.meetingPassword || '',
         token,
         sdkKey: zoomService.clientId,
         role: isProvider ? 'host' : 'participant',
-        joinUrl: booking.zoomJoinUrl,
+        joinUrl: booking.zoomJoinUrl || booking.meetingLink,
+        hostStartUrl: booking.zoomHostStartUrl || booking.hostLink,
       };
+
+      // Ensure both sets of fields are saved on booking if one was missing
+      if (!booking.zoomMeetingId || !booking.meetingId) {
+        booking.zoomMeetingId = existingMeetingId;
+        booking.meetingId = existingMeetingId;
+        booking.zoomMeetingPassword = session.meetingPassword;
+        booking.meetingPassword = session.meetingPassword;
+        booking.zoomJoinUrl = session.joinUrl;
+        booking.meetingLink = session.joinUrl;
+        booking.zoomHostStartUrl = session.hostStartUrl;
+        booking.hostLink = session.hostStartUrl;
+        await booking.save().catch(e => logger.warn('Could not update missing meeting fields on booking:', e.message));
+      }
     } else {
       // Create new Zoom meeting
-      const doctorName = `${booking.provider.firstName} ${booking.provider.lastName}`;
-      const patientName = `${booking.patient.firstName} ${booking.patient.lastName}`;
+      const doctorName = `${booking.provider.firstName || ''} ${booking.provider.lastName || ''}`.trim();
+      const patientName = `${booking.patient.firstName || ''} ${booking.patient.lastName || ''}`.trim();
       
-      session = await zoomService.createConsultationSession(bookingId, doctorName, patientName);
+      session = await zoomService.createConsultationSession(bookingId, doctorName, patientName, {
+        startTime: booking.scheduledTime,
+        duration: booking.duration || 30
+      });
       
-      // Save meeting details to booking
+      // Save meeting details to booking (both field sets for compatibility)
       booking.zoomMeetingId = session.meetingId;
       booking.zoomMeetingPassword = session.meetingPassword;
       booking.zoomJoinUrl = session.joinUrl;
       booking.zoomHostStartUrl = session.hostStartUrl;
+
+      booking.meetingId = session.meetingId;
+      booking.meetingPassword = session.meetingPassword;
+      booking.meetingLink = session.joinUrl;
+      booking.hostLink = session.hostStartUrl;
       await booking.save();
     }
 
@@ -202,17 +225,18 @@ const getVideoToken = async (req, res) => {
       return res.status(403).json(errorResponse('Not authorized'));
     }
 
-    if (!booking.zoomMeetingId) {
+    const existingMeetingId = booking.zoomMeetingId || booking.meetingId;
+    if (!existingMeetingId) {
       return res.status(400).json(errorResponse('No Zoom meeting created yet'));
     }
 
     // Generate new token
     const role = isProvider ? 1 : 0; // 1 for host, 0 for participant
-    const token = zoomService.generateSDKJWT(booking.zoomMeetingId, role);
+    const token = zoomService.generateSDKJWT(existingMeetingId, role);
 
     res.json(successResponse('Token generated', {
       token,
-      meetingId: booking.zoomMeetingId,
+      meetingId: existingMeetingId,
       sdkKey: zoomService.clientId,
       role: isProvider ? 'host' : 'participant',
       expiresIn: 7200,
@@ -252,9 +276,10 @@ const endVideoCall = async (req, res) => {
     }
 
     // Delete the Zoom meeting if it exists
-    if (booking.zoomMeetingId) {
+    const meetingIdToDelete = booking.zoomMeetingId || booking.meetingId;
+    if (meetingIdToDelete) {
       try {
-        await zoomService.deleteMeeting(booking.zoomMeetingId);
+        await zoomService.deleteMeeting(meetingIdToDelete);
       } catch (error) {
         logger.warn(`Failed to delete Zoom meeting: ${error.message}`);
         // Continue even if deletion fails
@@ -327,7 +352,8 @@ const getRoomStatus = async (req, res) => {
       return res.status(403).json(errorResponse('Not authorized'));
     }
 
-    if (!booking.zoomMeetingId) {
+    const activeMeetingId = booking.zoomMeetingId || booking.meetingId;
+    if (!activeMeetingId) {
       return res.json(successResponse('No video room created yet', {
         roomExists: false,
         bookingStatus: booking.status,
@@ -337,13 +363,13 @@ const getRoomStatus = async (req, res) => {
 
     // Try to get meeting details from Zoom
     try {
-      const meeting = await zoomService.getMeeting(booking.zoomMeetingId);
+      const meeting = await zoomService.getMeeting(activeMeetingId);
       
       res.json(successResponse('Room status fetched', {
         roomExists: true,
         meetingId: meeting.id,
         status: meeting.status || 'waiting',
-        joinUrl: booking.zoomJoinUrl,
+        joinUrl: booking.zoomJoinUrl || booking.meetingLink,
         bookingStatus: booking.status,
         consultationType: booking.consultationType,
         meetingDetails: meeting,
@@ -351,15 +377,15 @@ const getRoomStatus = async (req, res) => {
     } catch (zoomError) {
       logger.warn(`Failed to get Zoom meeting details: ${zoomError.message}`, {
         bookingId,
-        meetingId: booking.zoomMeetingId,
+        meetingId: activeMeetingId,
       });
       
       // Return booking info even if Zoom API fails
       res.json(successResponse('Room exists but status unavailable', {
         roomExists: true,
-        meetingId: booking.zoomMeetingId,
+        meetingId: activeMeetingId,
         status: 'unknown',
-        joinUrl: booking.zoomJoinUrl,
+        joinUrl: booking.zoomJoinUrl || booking.meetingLink,
         bookingStatus: booking.status,
         consultationType: booking.consultationType,
         warning: 'Could not fetch live meeting status from Zoom',
@@ -602,9 +628,10 @@ const completeVideoConsultation = async (req, res) => {
     await booking.save();
 
     // Delete the Zoom meeting if it exists
-    if (booking.zoomMeetingId) {
+    const meetingIdToDeleteOnComplete = booking.zoomMeetingId || booking.meetingId;
+    if (meetingIdToDeleteOnComplete) {
       try {
-        await zoomService.deleteMeeting(booking.zoomMeetingId);
+        await zoomService.deleteMeeting(meetingIdToDeleteOnComplete);
       } catch (error) {
         logger.warn(`Failed to delete Zoom meeting on complete: ${error.message}`);
       }

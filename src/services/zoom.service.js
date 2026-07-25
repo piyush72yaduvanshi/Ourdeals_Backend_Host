@@ -77,13 +77,22 @@ class ZoomService {
       if (!this.accountId || !this.clientId || !this.clientSecret) {
         // Mock mode
         logger.info('[MOCK] Creating Zoom meeting');
+        const meetingId = String(Date.now());
+        const joinUrl = `https://zoom.us/j/mock_${meetingId}`;
+        const hostUrl = `https://zoom.us/s/mock_${meetingId}`;
+        const password = '123456';
         return {
-          id: Date.now(),
+          id: meetingId,
+          meetingId: meetingId,
           topic: options.topic || 'Healthcare Consultation',
-          start_url: `https://zoom.us/s/mock_${Date.now()}`,
-          join_url: `https://zoom.us/j/mock_${Date.now()}`,
-          password: '123456',
+          start_url: hostUrl,
+          hostLink: hostUrl,
+          join_url: joinUrl,
+          meetingLink: joinUrl,
+          password: password,
+          meetingPassword: password,
           duration: options.duration || 30,
+          start_time: options.startTime ? formatForZoom(options.startTime) : new Date().toISOString(),
           mock: true,
         };
       }
@@ -130,12 +139,21 @@ class ZoomService {
 
       logger.info(`Zoom meeting created: ${response.data.id}`);
 
+      const meetingId = String(response.data.id);
+      const joinUrl = response.data.join_url;
+      const hostUrl = response.data.start_url;
+      const password = response.data.password || '';
+
       return {
-        id: response.data.id,
+        id: meetingId,
+        meetingId: meetingId,
         topic: response.data.topic,
-        start_url: response.data.start_url,
-        join_url: response.data.join_url,
-        password: response.data.password,
+        start_url: hostUrl,
+        hostLink: hostUrl,
+        join_url: joinUrl,
+        meetingLink: joinUrl,
+        password: password,
+        meetingPassword: password,
         duration: response.data.duration,
         start_time: response.data.start_time,
       };
@@ -287,25 +305,27 @@ class ZoomService {
    * @param {string} patientName - Patient name
    * @returns {Promise<Object>} Session details
    */
-  async createConsultationSession(bookingId, doctorName, patientName) {
+  async createConsultationSession(bookingId, doctorName, patientName, options = {}) {
     try {
       // Create meeting
       const meeting = await this.createMeeting({
         topic: `Consultation: Dr. ${doctorName} & ${patientName}`,
-        duration: 30
+        startTime: options.startTime,
+        duration: options.duration || 30
       });
 
+      const meetingId = String(meeting.id || meeting.meetingId);
       // Generate SDK tokens
-      const hostToken = this.generateSDKJWT(meeting.id, 1); // Host (doctor)
-      const participantToken = this.generateSDKJWT(meeting.id, 0); // Participant (patient)
+      const hostToken = this.generateSDKJWT(meetingId, 1); // Host (doctor)
+      const participantToken = this.generateSDKJWT(meetingId, 0); // Participant (patient)
 
       logger.info(`Consultation session created for booking: ${bookingId}`);
 
       return {
-        meetingId: meeting.id,
-        meetingPassword: meeting.password,
-        hostStartUrl: meeting.start_url,
-        joinUrl: meeting.join_url,
+        meetingId: meetingId,
+        meetingPassword: meeting.password || meeting.meetingPassword,
+        hostStartUrl: meeting.start_url || meeting.hostLink,
+        joinUrl: meeting.join_url || meeting.meetingLink,
         hostToken,
         participantToken,
         sdkKey: this.clientId,
