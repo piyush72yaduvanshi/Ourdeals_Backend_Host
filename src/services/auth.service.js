@@ -286,7 +286,7 @@ const forgotPassword = async (email) => {
     await user.save();
 
     logger.info("Password reset requested", { userId: user._id, email });
-    return { resetToken, email };
+    return { resetToken, email, userId: user._id, name: user.firstName || 'User' };
   } catch (error) {
     logger.error("Forgot password failed", { error: error.message });
     throw error;

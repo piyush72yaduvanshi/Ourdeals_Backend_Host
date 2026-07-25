@@ -97,14 +97,19 @@ const register = async (req, res) => {
       documents,
     });
 
-    // Send Welcome / Registration Confirmation Notification
+    // Send Welcome / Registration Confirmation Notification (All 4 channels: In-App, Push, SMS, Email)
     try {
-      await notificationService.sendNotification(
-        user._id,
-        'registration_successful',
-        'Registration Successful',
-        `Welcome to OnMint Healthcare, ${user.firstName || 'User'}! Your ${user.role || 'account'} registration was submitted successfully.`
-      );
+      await notificationService.send({
+        recipient: user._id,
+        type: 'registration_successful',
+        title: 'Registration Successful',
+        message: `Welcome to OnMint Healthcare, ${user.firstName || 'User'}! Your ${user.role || 'account'} registration was submitted successfully.`,
+        sendPush: true,
+        sendSMS: true,
+        sendEmail: true,
+        emailTemplate: 'WELCOME',
+        emailData: { name: user.firstName, role: user.role },
+      });
     } catch (notifErr) {
       logger.error('Failed to send registration notification', { error: notifErr.message });
     }
@@ -330,7 +335,25 @@ const forgotPassword = async (req, res) => {
     }
 
 
-    const { resetToken } = await authService.forgotPassword(email);
+    const { resetToken, userId, name } = await authService.forgotPassword(email);
+
+    try {
+      if (userId) {
+        await notificationService.send({
+          recipient: userId,
+          type: 'general',
+          title: 'Password Reset Requested',
+          message: 'A password reset link was sent to your email address.',
+          sendPush: true,
+          sendSMS: true,
+          sendEmail: true,
+          emailTemplate: 'PASSWORD_RESET',
+          emailData: { name, resetToken },
+        });
+      }
+    } catch (emailErr) {
+      logger.error('Failed to send password reset email notification', { error: emailErr.message });
+    }
 
 
 

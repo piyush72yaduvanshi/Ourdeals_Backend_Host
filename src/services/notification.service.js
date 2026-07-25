@@ -264,6 +264,10 @@ const sendBookingConfirmation = async (patientId, bookingDetails) => {
     message: `Your ${serviceType} booking has been created and sent to nearby providers.`,
     data: { bookingId: bookingDetails.id, serviceType },
     sendPush: true,
+    sendSMS: true,
+    sendEmail: true,
+    emailTemplate: "BOOKING_CONFIRMATION",
+    emailData: { bookingId: bookingDetails.id, serviceType },
   });
 };
 
@@ -278,6 +282,10 @@ const sendBookingAccepted = async (patientId, providerId, bookingDetails) => {
     message: `Your ${serviceType} booking request has been accepted.`,
     data: { bookingId: bookingDetails.id, serviceType },
     sendPush: true,
+    sendSMS: true,
+    sendEmail: true,
+    emailTemplate: "BOOKING_CONFIRMATION",
+    emailData: { bookingId: bookingDetails.id, serviceType, status: "accepted" },
   });
 };
 
@@ -290,6 +298,8 @@ const sendProviderArriving = async (patientId, providerId, eta) =>
     message: `Your provider will arrive in approximately ${eta} minutes.`,
     data: { eta },
     sendPush: true,
+    sendSMS: true,
+    sendEmail: true,
   });
 
 const sendEmergencyAlert = async (userId, emergencyDetails) =>
@@ -301,6 +311,7 @@ const sendEmergencyAlert = async (userId, emergencyDetails) =>
     data: { isEmergency: true },
     sendPush: true,
     sendSMS: true,
+    sendEmail: true,
   });
 
 const sendPrescriptionUploaded = async (patientId, doctorId) =>
@@ -311,6 +322,8 @@ const sendPrescriptionUploaded = async (patientId, doctorId) =>
     title: "Prescription Ready",
     message: "Your doctor has uploaded your prescription.",
     sendPush: true,
+    sendSMS: true,
+    sendEmail: true,
   });
 
 const sendReportReady = async (patientId, labId) =>
@@ -321,6 +334,8 @@ const sendReportReady = async (patientId, labId) =>
     title: "Report Ready",
     message: "Your test report is ready for download.",
     sendPush: true,
+    sendSMS: true,
+    sendEmail: true,
   });
 
 const sendCollectionScheduled = async (patientId, labId, collectionTime) =>
@@ -335,6 +350,8 @@ const sendCollectionScheduled = async (patientId, labId, collectionTime) =>
       labId,
     },
     sendPush: true,
+    sendSMS: true,
+    sendEmail: true,
   });
 
 const sendBookingCompleted = async (patientId, bookingId) =>
@@ -345,6 +362,8 @@ const sendBookingCompleted = async (patientId, bookingId) =>
     message: "Your booking has been completed. Thank you!",
     data: { bookingId },
     sendPush: true,
+    sendSMS: true,
+    sendEmail: true,
   });
 
 const sendBookingCancelled = async (userId, bookingId, reason) =>
@@ -357,6 +376,8 @@ const sendBookingCancelled = async (userId, bookingId, reason) =>
       : "Your booking has been cancelled.",
     data: { bookingId },
     sendPush: true,
+    sendSMS: true,
+    sendEmail: true,
   });
 
 const sendMeetingReminder = async (userId, meetingDetails) =>
@@ -389,6 +410,8 @@ const sendPrescriptionAvailable = async (patientId, prescriptionId) =>
     message: "Your doctor has uploaded your prescription. You can now view and download it.",
     data: { prescriptionId },
     sendPush: true,
+    sendSMS: true,
+    sendEmail: true,
   });
 
 /**
@@ -408,6 +431,8 @@ const sendNotification = async (userId, type, title, message, data = {}) => {
       message,
       data,
       sendPush: true,
+      sendSMS: true,
+      sendEmail: true,
     });
   } catch (error) {
     logger.error('Send notification failed', { error: error.message, userId, type });
@@ -490,6 +515,8 @@ const sendMedicineOrderToAllPharmacists = async (bookingId, orderDetails) => {
           orderDetails,
         },
         sendPush: true,
+        sendSMS: true,
+        sendEmail: true,
       })
     );
 
@@ -523,6 +550,8 @@ const sendNurseRequestToAllNurses = async (bookingId, requestDetails) => {
           requestDetails,
         },
         sendPush: true,
+        sendSMS: true,
+        sendEmail: true,
       })
     );
 
@@ -556,6 +585,8 @@ const sendLabTestRequestToAllLabs = async (bookingId, testDetails) => {
           testDetails,
         },
         sendPush: true,
+        sendSMS: true,
+        sendEmail: true,
       })
     );
 
