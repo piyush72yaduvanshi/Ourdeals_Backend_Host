@@ -29,6 +29,7 @@ const userSchema = new mongoose.Schema(
         "bloodbank",
         "pathology",
         "labtest",
+        "physiotherapist",
       ],
       required: true,
     },

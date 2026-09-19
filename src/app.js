@@ -19,6 +19,9 @@ import paymentRouter from "./routes/payment.routes.js";
 import prescriptionRouter from "./routes/prescription.routes.js";
 import bookingRouter from "./routes/booking.routes.js";
 import medicineRouter from "./routes/medicine.routes.js";
+import physiotherapyRouter from "./routes/physiotherapy.routes.js";
+import healthyRouter from "./routes/healthy.routes.js";
+import petCareRouter from "./routes/petCare.routes.js";
 import videoRoom from "./routes/video.routes.js";
 import accountRouter from "./routes/account.routes.js";
 import {
@@ -230,6 +233,10 @@ app.use("/api/v1/payments", paymentRouter);
 app.use("/api/v1/bookings", bookingRouter);
 app.use("/api/v1", prescriptionRouter);
 app.use("/api/v1/medicines", medicineRouter);
+app.use("/api/v1/physiotherapy", physiotherapyRouter);
+app.use("/api/v1/healthys", healthyRouter);
+app.use("/api/v1/petcare", petCareRouter);
+app.use("/api/v1/pet-care", petCareRouter); // Alias for kebab-case compatibility
 app.use("/api/v1/video", videoRoom);
 app.use("/api/v1/account", accountRouter); // Account deletion APIs
 

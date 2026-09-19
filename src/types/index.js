@@ -8,6 +8,7 @@ const UserRole = {
   BLOOD_BANK: "bloodbank",
   PATHOLOGY: "pathology",
   LABTEST: "labtest",
+  PHYSIOTHERAPIST: "physiotherapist",
 };
 
 const UserStatus = {
@@ -35,6 +36,7 @@ const ServiceType = {
   BLOOD_BANK: "bloodbank",
   PATHOLOGY: "pathology",
   LABTEST: "labtest",
+  PHYSIOTHERAPY: "physiotherapy",
 };
 
 const BloodGroup = {

@@ -1,4 +1,5 @@
 import { Medicine } from '../models/Medicine.model.js';
+import { MedicineCategory } from '../models/MedicineCategory.model.js';
 import { successResponse, errorResponse, paginatedResponse } from '../utils/response.util.js';
 import { s3Service } from '../services/s3.service.js';
 
@@ -22,18 +23,20 @@ const getAllMedicines = async (req, res) => {
       stock: { $gt: 0 }, // Only show medicines in stock
     };
 
-    // Search by name or generic name
+    // Search by name, generic name, brand, or manufacturer
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
         { genericName: { $regex: search, $options: 'i' } },
         { manufacturer: { $regex: search, $options: 'i' } },
+        { brand: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } },
       ];
     }
 
     // Filter by category
     if (category) {
-      query.category = category;
+      query.category = { $regex: new RegExp(`^${category}$`, 'i') };
     }
 
     // Filter by price range
@@ -53,7 +56,7 @@ const getAllMedicines = async (req, res) => {
     if (sortBy === 'price') {
       sortOptions.price = sortOrder === 'desc' ? -1 : 1;
     } else if (sortBy === 'discount') {
-      sortOptions.discountedPrice = sortOrder === 'desc' ? -1 : 1;
+      sortOptions.discountPercentage = -1;
     } else if (sortBy === 'name') {
       sortOptions.name = sortOrder === 'desc' ? -1 : 1;
     } else {
@@ -74,12 +77,20 @@ const getAllMedicines = async (req, res) => {
 
     // Calculate discount percentage and clean URLs
     const medicinesWithDiscount = medicines.map((medicine) => {
+      const basePrice = medicine.mrp || medicine.price || 0;
+      const salePrice = medicine.sellingPrice || medicine.discountedPrice || basePrice;
+      const discountPct = basePrice > salePrice && basePrice > 0
+        ? Math.round(((basePrice - salePrice) / basePrice) * 100)
+        : 0;
+
       const formattedMedicine = {
         ...medicine,
-        discountPercentage: medicine.discountedPrice 
-          ? Math.round(((medicine.price - medicine.discountedPrice) / medicine.price) * 100)
-          : 0,
-        finalPrice: medicine.discountedPrice || medicine.price,
+        brand: medicine.brand || medicine.manufacturer,
+        packSize: medicine.packSize || medicine.packaging,
+        mrp: basePrice,
+        sellingPrice: salePrice,
+        discountPercentage: discountPct,
+        finalPrice: salePrice,
       };
 
       if (formattedMedicine.imageUrl) {
@@ -108,7 +119,7 @@ const getAllMedicines = async (req, res) => {
   }
 };
 
-// Public API - Get medicine by ID
+// Public API - Get medicine by ID with Frequently Bought Together & Related Medicines
 const getMedicineById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -116,37 +127,83 @@ const getMedicineById = async (req, res) => {
     const medicine = await Medicine.findOne({
       _id: id,
       isActive: true,
-    }).lean();
+    })
+      .populate('frequentlyBoughtTogether', 'name genericName brand manufacturer mrp sellingPrice price discountedPrice imageUrl images packSize stock')
+      .lean();
 
     if (!medicine) {
       return res.status(404).json(errorResponse('Medicine not found'));
     }
 
-    // Calculate discount percentage
-    const medicineWithDiscount = {
+    const basePrice = medicine.mrp || medicine.price || 0;
+    const salePrice = medicine.sellingPrice || medicine.discountedPrice || basePrice;
+    const discountPct = basePrice > salePrice && basePrice > 0
+      ? Math.round(((basePrice - salePrice) / basePrice) * 100)
+      : 0;
+
+    // Fetch related medicines in the same category
+    const relatedMedicines = await Medicine.find({
+      category: medicine.category,
+      _id: { $ne: medicine._id },
+      isActive: true,
+    })
+      .select('name genericName brand manufacturer mrp sellingPrice price discountedPrice imageUrl images packSize stock')
+      .limit(6)
+      .lean();
+
+    const formattedMedicine = {
       ...medicine,
-      discountPercentage: medicine.discountedPrice 
-        ? Math.round(((medicine.price - medicine.discountedPrice) / medicine.price) * 100)
-        : 0,
-      finalPrice: medicine.discountedPrice || medicine.price,
+      brand: medicine.brand || medicine.manufacturer,
+      packSize: medicine.packSize || medicine.packaging,
+      mrp: basePrice,
+      sellingPrice: salePrice,
+      discountPercentage: discountPct,
+      finalPrice: salePrice,
+      frequentlyBoughtTogether: medicine.frequentlyBoughtTogether || [],
+      relatedMedicines: relatedMedicines || [],
     };
 
-    res.json(successResponse('Medicine details fetched', medicineWithDiscount));
+    res.json(successResponse('Medicine details fetched', formattedMedicine));
   } catch (error) {
     console.error('Get medicine by ID error:', error);
     res.status(500).json(errorResponse(error.message || 'Failed to fetch medicine'));
   }
 };
 
-// Public API - Get all categories
+// Public API - Get all categories (checks dynamic MedicineCategory model + distinct fallback)
 const getCategories = async (req, res) => {
   try {
+    const dynamicCategories = await MedicineCategory.find({ isActive: true })
+      .sort({ displayOrder: 1, name: 1 })
+      .lean();
+
+    if (dynamicCategories.length > 0) {
+      const categoriesWithCount = await Promise.all(
+        dynamicCategories.map(async (cat) => {
+          const count = await Medicine.countDocuments({
+            category: { $regex: new RegExp(`^${cat.name}$`, 'i') },
+            isActive: true,
+            stock: { $gt: 0 },
+          });
+          return {
+            _id: cat._id,
+            name: cat.name,
+            slug: cat.slug,
+            image: cat.image,
+            description: cat.description,
+            count,
+          };
+        })
+      );
+      return res.json(successResponse('Categories fetched', categoriesWithCount));
+    }
+
+    // Fallback: distinct query from Medicine collection
     const categories = await Medicine.distinct('category', { 
       isActive: true,
       stock: { $gt: 0 }
     });
 
-    // Get count for each category
     const categoriesWithCount = await Promise.all(
       categories.map(async (category) => {
         const count = await Medicine.countDocuments({
@@ -427,6 +484,61 @@ const updateStock = async (req, res) => {
   }
 };
 
+// Admin/Pharmacist - Category CRUD
+const adminCreateMedicineCategory = async (req, res) => {
+  try {
+    const { name, description, image, displayOrder } = req.body;
+    if (!name) {
+      return res.status(400).json(errorResponse("Category name is required"));
+    }
+
+    const category = new MedicineCategory({
+      name,
+      description,
+      image,
+      displayOrder: displayOrder || 0,
+    });
+
+    await category.save();
+    res.status(201).json(successResponse("Medicine category created successfully", category));
+  } catch (error) {
+    res.status(400).json(errorResponse(error.message));
+  }
+};
+
+const adminUpdateMedicineCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const category = await MedicineCategory.findByIdAndUpdate(id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!category) {
+      return res.status(404).json(errorResponse("Category not found"));
+    }
+    res.json(successResponse("Medicine category updated successfully", category));
+  } catch (error) {
+    res.status(400).json(errorResponse(error.message));
+  }
+};
+
+const adminDeleteMedicineCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const category = await MedicineCategory.findByIdAndUpdate(
+      id,
+      { isActive: false },
+      { new: true }
+    );
+    if (!category) {
+      return res.status(404).json(errorResponse("Category not found"));
+    }
+    res.json(successResponse("Medicine category deactivated successfully"));
+  } catch (error) {
+    res.status(500).json(errorResponse(error.message));
+  }
+};
+
 export {
   getAllMedicines,
   getMedicineById,
@@ -436,4 +548,7 @@ export {
   updateMedicine,
   deleteMedicine,
   updateStock,
+  adminCreateMedicineCategory,
+  adminUpdateMedicineCategory,
+  adminDeleteMedicineCategory,
 };

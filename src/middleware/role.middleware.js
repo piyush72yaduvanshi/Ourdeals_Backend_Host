@@ -28,6 +28,7 @@ const authorizePharmacist = authorize("pharmacist");
 const authorizeAmbulance = authorize("ambulance");
 const authorizeBloodBank = authorize("bloodbank");
 const authorizePathology = authorize("pathology");
+const authorizePhysiotherapist = authorize("physiotherapist");
 
 const authorizeProvider = authorize(
   "doctor",
@@ -36,6 +37,7 @@ const authorizeProvider = authorize(
   "ambulance",
   "bloodbank",
   "pathology",
+  "physiotherapist",
 );
 
 export {
@@ -48,5 +50,6 @@ export {
   authorizeAmbulance,
   authorizeBloodBank,
   authorizePathology,
+  authorizePhysiotherapist,
   authorizeProvider,
 };
