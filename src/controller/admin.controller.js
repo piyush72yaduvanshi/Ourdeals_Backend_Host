@@ -5,6 +5,9 @@ import { Medicine } from '../models/Medicine.model.js';
 import { Ambulance } from '../models/Ambulance.model.js';
 import { BloodBank } from '../models/BloodBank.model.js';
 import { Pathology } from '../models/Pathology.model.js';
+import { Physiotherapist } from '../models/Physiotherapist.model.js';
+import { Doctor } from '../models/Doctor.model.js';
+import { Nurse } from '../models/Nurse.model.js';
 import { UserStatus } from '../types/index.js';
 import { s3Service } from '../services/s3.service.js';
 import {
@@ -173,11 +176,14 @@ const approveProvider = async (req, res) => {
     }
 
 
-    user.status = UserStatus.APPROVED;
-    await user.save();
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { $set: { status: UserStatus.APPROVED } },
+      { new: true, runValidators: false }
+    ).select('-password');
 
     return res.json(
-      successResponse('Provider approved', user)
+      successResponse('Provider approved', updatedUser)
     );
   } catch (error) {
     return res.status(500).json(
@@ -210,11 +216,14 @@ const rejectProvider = async (req, res) => {
     }
 
 
-    user.status = UserStatus.REJECTED;
-    await user.save();
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { $set: { status: UserStatus.REJECTED } },
+      { new: true, runValidators: false }
+    ).select('-password');
 
     return res.json(
-      successResponse('Provider rejected', user)
+      successResponse('Provider rejected', updatedUser)
     );
   } catch (error) {
     return res.status(500).json(
@@ -247,11 +256,14 @@ const blockUser = async (req, res) => {
     }
 
 
-    user.status = UserStatus.BLOCKED;
-    await user.save();
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { $set: { status: UserStatus.BLOCKED } },
+      { new: true, runValidators: false }
+    ).select('-password');
 
     return res.json(
-      successResponse('User blocked', user)
+      successResponse('User blocked', updatedUser)
     );
   } catch (error) {
     return res.status(500).json(
