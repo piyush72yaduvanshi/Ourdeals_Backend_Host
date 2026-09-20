@@ -198,8 +198,18 @@ export const getNearbyRequests = async (req, res) => {
     const physioId = req.user.userId;
     const physio = await User.findById(physioId).lean();
 
+    // Logic: First approve from admin, then got request
+    if (physio?.status !== "approved" && physio?.status !== "active") {
+      return res.json(
+        successResponse(
+          "Your profile is pending admin approval. You will receive booking requests once approved by admin.",
+          []
+        )
+      );
+    }
+
     const query = {
-      status: { $in: ["requested", "offers_received"] },
+      status: { $in: ["requested", "offers_received", "pending"] },
       "rejectedByPhysiotherapists.physiotherapist": { $ne: physioId },
     };
 
@@ -217,10 +227,22 @@ export const getNearbyRequests = async (req, res) => {
       query.$or = orConditions;
     }
 
-    const requests = await PhysiotherapyBooking.find(query)
+    let requests = await PhysiotherapyBooking.find(query)
       .populate("patient", "firstName lastName phone profilePicture")
       .sort({ createdAt: -1 })
       .lean();
+
+    // Fallback: If no location-filtered requests found, return open unassigned requests
+    if (!requests || requests.length === 0) {
+      const openQuery = {
+        status: { $in: ["requested", "offers_received", "pending"] },
+        "rejectedByPhysiotherapists.physiotherapist": { $ne: physioId },
+      };
+      requests = await PhysiotherapyBooking.find(openQuery)
+        .populate("patient", "firstName lastName phone profilePicture")
+        .sort({ createdAt: -1 })
+        .lean();
+    }
 
     // Map whether current physiotherapist already sent an offer
     const formatted = requests.map((reqItem) => {
