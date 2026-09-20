@@ -73,6 +73,14 @@ const HealthyProductSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    isBestseller: {
+      type: Boolean,
+      default: false,
+    },
+    subtitle: {
+      type: String,
+      trim: true,
+    },
     isActive: {
       type: Boolean,
       default: true,

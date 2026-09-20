@@ -8,7 +8,7 @@ class PhysiotherapyService {
   /**
    * Find nearby physiotherapists within radius (default 50km = 50000m)
    */
-  async findNearbyPhysiotherapists(coordinates, maxDistance = 50000, city = null) {
+  async findNearbyPhysiotherapists(coordinates, maxDistance = 50000, city = null, state = null) {
     let query = {
       role: "physiotherapist",
       status: { $in: ["approved", "active"] },
@@ -29,13 +29,25 @@ class PhysiotherapyService {
     }
 
     try {
-      const providers = await Physiotherapist.find(query)
+      let providers = await Physiotherapist.find(query)
         .select("firstName lastName phone email city state profilePicture specializations experience sessionFee rating")
         .limit(20)
         .lean();
 
+      // State-level fallback if no therapist registered in this specific district yet
+      if (providers.length === 0 && state) {
+        providers = await Physiotherapist.find({
+          role: "physiotherapist",
+          status: { $in: ["approved", "active"] },
+          state: { $regex: new RegExp(`^${state}$`, "i") },
+        })
+          .select("firstName lastName phone email city state profilePicture specializations experience sessionFee rating")
+          .limit(20)
+          .lean();
+      }
+
       if (providers.length === 0) {
-        // Fallback: return active physiotherapists if geospatial returns empty
+        // Fallback: return active physiotherapists if geospatial/city returns empty
         return await Physiotherapist.find({
           role: "physiotherapist",
           status: { $in: ["approved", "active"] },
@@ -70,11 +82,12 @@ class PhysiotherapyService {
 
     await booking.save();
 
-    // Find nearby physiotherapists
+    // Find nearby physiotherapists with city and state fallback
     const nearbyPhysios = await this.findNearbyPhysiotherapists(
       bookingData.location?.coordinates,
       50000,
-      bookingData.location?.city
+      bookingData.location?.city || bookingData.city,
+      bookingData.location?.state || bookingData.state
     );
 
     if (nearbyPhysios.length > 0) {

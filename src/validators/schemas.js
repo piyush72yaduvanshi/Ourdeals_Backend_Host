@@ -9,6 +9,8 @@ const USER_ROLES = [
   "ambulance",
   "bloodbank",
   "pathology",
+  "labtest",
+  "physiotherapist",
 ];
 
 const SERVICE_TYPES = [
@@ -18,6 +20,7 @@ const SERVICE_TYPES = [
   "ambulance",
   "bloodbank",
   "pathology",
+  "physiotherapy",
 ];
 
 const BOOKING_STATUS = [
@@ -98,7 +101,7 @@ const registerSchema = Joi.object({
   }),
 
   experience: Joi.when("role", {
-    is: Joi.valid("doctor", "nurse"),
+    is: Joi.valid("doctor", "nurse", "physiotherapist"),
     then: Joi.number().optional(),
   }),
 
@@ -140,8 +143,8 @@ const registerSchema = Joi.object({
   }),
 
   specializations: Joi.when("role", {
-    is: "nurse",
-    then: Joi.array().items(Joi.string()),
+    is: Joi.valid("nurse", "physiotherapist"),
+    then: Joi.array().items(Joi.string()).optional(),
   }),
 
   deliveryTimes: Joi.when("role", {
@@ -203,9 +206,10 @@ const registerSchema = Joi.object({
       "nurse",
       "pharmacist",
       "bloodbank",
-      "pathology"
+      "pathology",
+      "physiotherapist"
     ),
-    then: Joi.string().optional(),
+    then: Joi.string().allow("").optional(),
   }),
 
   pharmacyName: Joi.when("role", {
@@ -287,6 +291,21 @@ const registerSchema = Joi.object({
   labName: Joi.when("role", {
     is: "pathology",
     then: Joi.string().optional(),
+  }),
+
+  clinicAddress: Joi.when("role", {
+    is: "physiotherapist",
+    then: Joi.string().allow("").optional(),
+  }),
+
+  sessionFee: Joi.when("role", {
+    is: "physiotherapist",
+    then: Joi.number().optional(),
+  }),
+
+  homeVisitAvailable: Joi.when("role", {
+    is: "physiotherapist",
+    then: Joi.boolean().optional(),
   }),
 });
 

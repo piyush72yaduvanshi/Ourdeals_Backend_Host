@@ -1,14 +1,14 @@
-﻿import jwt from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 
 const generateAccessToken = (payload) => {
   return jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || "15m",
+    expiresIn: process.env.ACCESS_TOKEN_EXPIRY || process.env.JWT_EXPIRES_IN || "30d",
   });
 };
 
 const generateRefreshToken = (payload) => {
   return jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
+    expiresIn: process.env.REFRESH_TOKEN_EXPIRY || process.env.JWT_REFRESH_EXPIRES_IN || "60d",
   });
 };
 

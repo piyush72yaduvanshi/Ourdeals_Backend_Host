@@ -24,6 +24,7 @@ import healthyRouter from "./routes/healthy.routes.js";
 import petCareRouter from "./routes/petCare.routes.js";
 import videoRoom from "./routes/video.routes.js";
 import accountRouter from "./routes/account.routes.js";
+import locationRouter from "./routes/location.routes.js";
 import {
   errorHandler,
   notFoundHandler,
@@ -239,6 +240,8 @@ app.use("/api/v1/petcare", petCareRouter);
 app.use("/api/v1/pet-care", petCareRouter); // Alias for kebab-case compatibility
 app.use("/api/v1/video", videoRoom);
 app.use("/api/v1/account", accountRouter); // Account deletion APIs
+app.use("/api/v1/locations", locationRouter); // Indian States & Districts API
+app.use("/api/v1/districts", locationRouter); // Alias for direct district lookup
 
 app.get("/hello", (req, res) => {
   res.json({

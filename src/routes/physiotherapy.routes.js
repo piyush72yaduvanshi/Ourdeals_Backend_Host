@@ -29,6 +29,12 @@ router.post(
   authorize("patient"),
   createBookingRequest
 );
+router.post(
+  "/request",
+  authenticate,
+  authorize("patient"),
+  createBookingRequest
+);
 
 router.get(
   "/patient/bookings",

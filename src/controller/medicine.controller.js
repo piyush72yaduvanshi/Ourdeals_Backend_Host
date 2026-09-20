@@ -36,7 +36,8 @@ const getAllMedicines = async (req, res) => {
 
     // Filter by category
     if (category) {
-      query.category = { $regex: new RegExp(`^${category}$`, 'i') };
+      const sanitized = category.trim().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\s*(&|and)\s*/gi, '\\s*(&|and)\\s*');
+      query.category = { $regex: new RegExp(`^${sanitized}$`, 'i') };
     }
 
     // Filter by price range

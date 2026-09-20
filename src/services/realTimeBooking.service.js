@@ -25,11 +25,11 @@ const createRealTimeBooking = async (bookingData) => {
       // Find available providers by city (or fallback to geo for doctor)
       const providers = await findAvailableProviders(
         booking.serviceType,
-        booking.location.coordinates,
+        booking.location?.coordinates || [0, 0],
         booking.isEmergency,
         booking.category,
-        booking.city,
-        booking.state
+        booking.city || booking.location?.city,
+        booking.state || booking.location?.state
       );
 
       if (providers.length === 0) {
@@ -124,12 +124,41 @@ const findAvailableProviders = async (serviceType, coordinates, isEmergency, cat
 
     logger.info(`Finding providers: role=${role}, city=${city || 'N/A'}, state=${state || 'N/A'}`);
 
-    const providers = await User.find(query)
+    let providers = await User.find(query)
       .select("_id firstName lastName phone email deviceTokens location city state")
       .limit(limit)
       .lean();
 
-    logger.info(`Found ${providers.length} providers for ${serviceType} in city: ${city || 'N/A'}`);
+    // Smart fallback 1: If no provider in exact district/city, search across the same state
+    if (providers.length === 0 && state && state.trim() !== '') {
+      logger.info(`No provider found for ${serviceType} in district '${city}'. Trying state fallback '${state}'.`);
+      const stateQuery = {
+        role: { $in: rolesToSearch },
+        status: "approved",
+        state: { $regex: new RegExp(`^${state.trim()}$`, 'i') },
+      };
+      if (role === 'ambulance') stateQuery.isAvailable = true;
+      providers = await User.find(stateQuery)
+        .select("_id firstName lastName phone email deviceTokens location city state")
+        .limit(limit)
+        .lean();
+    }
+
+    // Smart fallback 2: If still no provider in state, fallback to all active approved providers of that role
+    if (providers.length === 0) {
+      logger.info(`No provider found for ${serviceType} in state '${state}'. Trying general active providers fallback.`);
+      const activeQuery = {
+        role: { $in: rolesToSearch },
+        status: "approved",
+      };
+      if (role === 'ambulance') activeQuery.isAvailable = true;
+      providers = await User.find(activeQuery)
+        .select("_id firstName lastName phone email deviceTokens location city state")
+        .limit(limit)
+        .lean();
+    }
+
+    logger.info(`Found ${providers.length} providers for ${serviceType} (district: ${city || 'N/A'}, state: ${state || 'N/A'})`);
     return providers;
   } catch (error) {
     logger.error("Find available providers failed", { error: error.message });

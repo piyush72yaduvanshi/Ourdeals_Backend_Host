@@ -183,8 +183,6 @@ const userSchema = new mongoose.Schema(
 userSchema.index({ location: "2dsphere" });
 
 // PERFORMANCE INDEXES
-// FIXED: Index phone field with unique constraint to prevent duplicates
-userSchema.index({ phone: 1 }, { unique: true });
 // FIXED: Index status field instead of non-existent isApproved field
 userSchema.index({ role: 1, status: 1 });
 // REMOVED: rating.average index - rating field doesn't exist in base User schema

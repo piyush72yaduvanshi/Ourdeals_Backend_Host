@@ -6,6 +6,7 @@ import { Pharmacist } from "../models/Pharmacist.model.js";
 import { BloodBank } from "../models/BloodBank.model.js";
 import { Pathology } from "../models/Pathology.model.js";
 import { LabTest } from "../models/LabTest.model.js";
+import { Physiotherapist } from "../models/Physiotherapist.model.js";
 import { tokenService } from "./token.service.js";
 import { logger } from "../utils/logger.util.js";
 import { UserRole, UserStatus } from "../types/index.js";
@@ -41,6 +42,13 @@ const register = async (userData) => {
       refreshTokens: [],
     };
 
+    if (!baseData.location || !baseData.location.coordinates || baseData.location.coordinates.length < 2) {
+      baseData.location = {
+        type: 'Point',
+        coordinates: [78.5788, 25.4484],
+      };
+    }
+
     let user;
 
     switch (role) {
@@ -66,6 +74,9 @@ const register = async (userData) => {
         break;
       case UserRole.LABTEST:
         user = await LabTest.create(baseData);
+        break;
+      case UserRole.PHYSIOTHERAPIST:
+        user = await Physiotherapist.create(baseData);
         break;
       default:
         user = await User.create(baseData);

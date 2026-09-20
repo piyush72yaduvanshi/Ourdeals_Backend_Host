@@ -345,8 +345,17 @@ const createMedicine = async (req, res) => {
   try {
     const medicineData = {
       ...req.body,
+      isActive: req.body.isActive !== undefined ? (req.body.isActive === true || req.body.isActive === 'true') : true,
       // Don't assign pharmacist - will be assigned when order is accepted
     };
+
+    if (medicineData.price) medicineData.price = Number(medicineData.price);
+    if (medicineData.discountedPrice) medicineData.discountedPrice = Number(medicineData.discountedPrice);
+    if (medicineData.stock !== undefined && medicineData.stock !== '') {
+      medicineData.stock = Number(medicineData.stock);
+    } else {
+      medicineData.stock = 100;
+    }
 
     // Handle multiple images (1-5) using S3
     if (req.files && req.files.length > 0) {
@@ -495,7 +504,10 @@ const getAllMedicines = async (req, res) => {
     if (search) {
       query.$text = { $search: search };
     }
-    if (category) query.category = category;
+    if (category) {
+      const sanitized = category.trim().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\s*(&|and)\s*/gi, '\\s*(&|and)\\s*');
+      query.category = { $regex: new RegExp(`^${sanitized}$`, 'i') };
+    }
     if (pharmacist) query.pharmacist = pharmacist;
 
     const skip = (Number(page) - 1) * Number(limit);

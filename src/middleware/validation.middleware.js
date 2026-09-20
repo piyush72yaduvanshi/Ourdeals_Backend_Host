@@ -1,8 +1,56 @@
-﻿import Joi from "joi";
+import Joi from "joi";
 import { errorResponse } from "../utils/response.util.js";
+
+const unflattenObject = (obj) => {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return obj;
+  const result = {};
+  for (const [rawKey, value] of Object.entries(obj)) {
+    if (rawKey.includes("[") && rawKey.includes("]")) {
+      const parts = rawKey
+        .replace(/\]/g, "")
+        .split("[")
+        .filter(Boolean);
+      let current = result;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const part = parts[i];
+        const nextPart = parts[i + 1];
+        const isNextIndex = /^\d+$/.test(nextPart);
+        if (!current[part]) {
+          current[part] = isNextIndex ? [] : {};
+        }
+        current = current[part];
+      }
+      const lastPart = parts[parts.length - 1];
+      if (Array.isArray(current)) {
+        current[parseInt(lastPart, 10)] = value;
+      } else {
+        current[lastPart] = value;
+      }
+    } else {
+      result[rawKey] = value;
+    }
+  }
+
+  const cleanArrays = (target) => {
+    if (Array.isArray(target)) {
+      return target.filter((x) => x !== undefined).map(cleanArrays);
+    }
+    if (target && typeof target === "object") {
+      for (const k of Object.keys(target)) {
+        target[k] = cleanArrays(target[k]);
+      }
+    }
+    return target;
+  };
+
+  return cleanArrays(result);
+};
 
 const validate = (schema) => {
   return (req, res, next) => {
+    if (req.body && typeof req.body === "object") {
+      req.body = unflattenObject(req.body);
+    }
     const { error, value } = schema.validate(req.body, {
       abortEarly: false,
       stripUnknown: true,

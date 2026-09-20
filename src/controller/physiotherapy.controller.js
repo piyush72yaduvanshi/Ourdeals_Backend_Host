@@ -203,12 +203,18 @@ export const getNearbyRequests = async (req, res) => {
       "rejectedByPhysiotherapists.physiotherapist": { $ne: physioId },
     };
 
-    // If city is set on physiotherapist profile, match city or recent requests
-    if (physio?.city) {
-      query.$or = [
-        { "location.city": { $regex: new RegExp(`^${physio.city}$`, "i") } },
+    // If city or state is set on physiotherapist profile, match city, state, or notified requests
+    if (physio?.city || physio?.state) {
+      const orConditions = [
         { "notifiedPhysiotherapists.physiotherapist": physioId },
       ];
+      if (physio?.city) {
+        orConditions.push({ "location.city": { $regex: new RegExp(`^${physio.city}$`, "i") } });
+      }
+      if (physio?.state) {
+        orConditions.push({ "location.state": { $regex: new RegExp(`^${physio.state}$`, "i") } });
+      }
+      query.$or = orConditions;
     }
 
     const requests = await PhysiotherapyBooking.find(query)
@@ -439,9 +445,14 @@ export const getPhysiotherapistBookings = async (req, res) => {
           whatsappLink: `https://wa.me/${cleanPhone}?text=Hello%20${encodeURIComponent(b.patientName)},%20I%20am%20your%20physiotherapist%20from%20OurDeals.`,
         };
       }
+      const myOffer = b.offers?.find(
+        (o) => (o.physiotherapist?._id || o.physiotherapist)?.toString() === physioId.toString()
+      );
       return {
         ...b,
         patientContact,
+        alreadyOffered: !!myOffer,
+        myOffer: myOffer || null,
       };
     });
 
@@ -458,7 +469,7 @@ export const getBookingById = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const booking = await PhysiotherapyBooking.findById(bookingId)
-      .populate("patient", "firstName lastName phone profilePicture")
+      .populate("patient", "firstName lastName phone profilePicture age gender")
       .populate("assignedPhysiotherapist", "firstName lastName phone email profilePicture specializations experience rating")
       .populate("offers.physiotherapist", "firstName lastName phone email profilePicture specializations experience rating")
       .lean();
@@ -466,6 +477,18 @@ export const getBookingById = async (req, res) => {
     if (!booking) {
       return res.status(404).json(errorResponse("Booking not found"));
     }
+
+    const offerAmount =
+      booking.confirmedOffer?.offerAmount ||
+      booking.offers?.find(
+        (o) =>
+          o.status === "accepted" ||
+          (req.user?._id &&
+            (o.physiotherapist?._id || o.physiotherapist)?.toString() ===
+              req.user._id.toString())
+      )?.offerAmount ||
+      booking.offers?.[0]?.offerAmount ||
+      null;
 
     // Attach WhatsApp and phone contact if confirmed
     let contactInfo = null;
@@ -479,7 +502,15 @@ export const getBookingById = async (req, res) => {
       };
     }
 
-    res.json(successResponse("Booking details fetched", { ...booking, contactInfo }));
+    res.json(
+      successResponse("Booking details fetched", {
+        ...booking,
+        offerAmount,
+        finalAmount: offerAmount,
+        fees: offerAmount,
+        contactInfo,
+      })
+    );
   } catch (error) {
     res.status(500).json(errorResponse(error.message));
   }

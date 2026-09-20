@@ -8,8 +8,8 @@ const {
   resetSecret: JWT_RESET_SECRET,
 } = envConfig.jwt;
 
-const ACCESS_TOKEN_EXPIRY = envConfig.jwt.accessExpiry || "20d";
-const REFRESH_TOKEN_EXPIRY = envConfig.jwt.refreshExpiry || "20d";
+const ACCESS_TOKEN_EXPIRY = envConfig.jwt.accessExpiry || "30d";
+const REFRESH_TOKEN_EXPIRY = envConfig.jwt.refreshExpiry || "60d";
 const RESET_TOKEN_EXPIRY = "10m";
 
 const generateAccessToken = (payload) => {

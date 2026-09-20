@@ -277,6 +277,35 @@ const getBooking = async (bookingId) => {
     }
 
     if (!booking) {
+      try {
+        const { PhysiotherapyBooking } = await import('../models/PhysiotherapyBooking.model.js');
+        const physioBooking = await PhysiotherapyBooking.findById(bookingId)
+          .read('primary')
+          .populate('assignedPhysiotherapist', 'firstName lastName phone email gender specialization experience licenseNumber city state pincode profilePicture role')
+          .populate('patient', 'firstName lastName phone')
+          .populate('offers.physiotherapist', 'firstName lastName phone email specialization experience rating')
+          .lean();
+
+        if (physioBooking) {
+          logger.info('✅ Found in PhysiotherapyBooking collection');
+          booking = physioBooking;
+          booking.serviceType = 'physiotherapy';
+          booking.title = booking.service || 'Physiotherapy Treatment';
+          booking.scheduledTime = booking.scheduledDate || booking.createdAt;
+          if (booking.assignedPhysiotherapist) {
+            booking.provider = booking.assignedPhysiotherapist;
+            booking.acceptedProvider = booking.assignedPhysiotherapist;
+          } else if (booking.confirmedOffer?.physiotherapist) {
+            booking.provider = booking.confirmedOffer.physiotherapist;
+            booking.acceptedProvider = booking.confirmedOffer.physiotherapist;
+          }
+        }
+      } catch (e) {
+        logger.error('❌ Error loading PhysiotherapyBooking:', e.message);
+      }
+    }
+
+    if (!booking) {
       logger.error('❌ Booking not found in any collection');
       const error = new Error('Booking not found');
       error.statusCode = 404;
@@ -375,20 +404,45 @@ const getUserBookings = async (userId, role, query = {}) => {
           ]
         };
 
+    let shouldQueryPhysio = (role === 'patient');
+    const physioFilter = { patient: userId };
+
     // Only add status filter if it's not 'all'
-    if (status && status !== 'all') { filter.status = status; rtFilter.status = status; }
+    if (status && status !== 'all') {
+      filter.status = status;
+      rtFilter.status = status;
+      if (status === 'requested' || status === 'pending') {
+        physioFilter.status = { $in: ['requested', 'offers_received'] };
+      } else if (status === 'accepted' || status === 'in_progress') {
+        physioFilter.status = { $in: ['confirmed', 'in_progress'] };
+      } else {
+        physioFilter.status = status;
+      }
+    }
     
     // Only add serviceType filter if it's not 'all'
     if (serviceType && serviceType !== 'all') { 
-      if (serviceType === 'pathology') {
+      const st = serviceType.toLowerCase();
+      if (st === 'pathology' || st === 'labtest') {
         filter.serviceType = { $in: ['pathology', 'labtest'] };
         rtFilter.serviceType = { $in: ['pathology', 'labtest'] };
-      } else if (serviceType === 'bloodbank') {
-        filter.serviceType = { $in: ['bloodbank', 'pathology', 'labtest'] };
-        rtFilter.serviceType = { $in: ['bloodbank', 'pathology', 'labtest'] };
+        shouldQueryPhysio = false;
+      } else if (st === 'bloodbank' || st === 'blood bank') {
+        filter.serviceType = { $in: ['bloodbank', 'blood bank'] };
+        rtFilter.serviceType = { $in: ['bloodbank', 'blood bank'] };
+        shouldQueryPhysio = false;
+      } else if (st === 'pharmacist' || st === 'pharmacy' || st === 'medicine') {
+        filter.serviceType = { $in: ['pharmacist', 'pharmacy', 'medicine'] };
+        rtFilter.serviceType = { $in: ['pharmacist', 'pharmacy', 'medicine'] };
+        shouldQueryPhysio = false;
+      } else if (st === 'physiotherapy' || st === 'physiotherapist') {
+        filter.serviceType = { $in: ['physiotherapy', 'physiotherapist'] };
+        rtFilter.serviceType = { $in: ['physiotherapy', 'physiotherapist'] };
+        // shouldQueryPhysio stays true
       } else {
         filter.serviceType = serviceType; 
         rtFilter.serviceType = serviceType; 
+        shouldQueryPhysio = false;
       }
     }
 
@@ -398,6 +452,14 @@ const getUserBookings = async (userId, role, query = {}) => {
       RealTimeBooking = rtModule.RealTimeBooking;
     } catch (e) {}
 
+    let PhysiotherapyBooking;
+    if (shouldQueryPhysio) {
+      try {
+        const physioModule = await import('../models/PhysiotherapyBooking.model.js');
+        PhysiotherapyBooking = physioModule.PhysiotherapyBooking;
+      } catch (e) {}
+    }
+
     const queries = [
       Booking.find(filter).populate('provider patient prescription').lean()
     ];
@@ -406,22 +468,45 @@ const getUserBookings = async (userId, role, query = {}) => {
       queries.push(RealTimeBooking.find(rtFilter).populate('acceptedProvider patient prescription').lean());
     }
 
+    if (shouldQueryPhysio && PhysiotherapyBooking) {
+      queries.push(PhysiotherapyBooking.find(physioFilter).populate('assignedPhysiotherapist patient offers.physiotherapist').lean());
+    }
+
     const results = await Promise.all(queries);
     
     let allBookings = [...results[0]];
     if (results.length > 1 && results[1]) {
       const rtBookings = results[1].map(b => {
         if (b.acceptedProvider) b.provider = b.acceptedProvider;
-        // Ensure serviceType is carried over clearly if needed
+        if (!b.serviceType && b.medicines && b.medicines.length > 0) {
+          b.serviceType = 'pharmacist';
+        }
         return b;
       });
       allBookings = [...allBookings, ...rtBookings];
     }
+
+    if (results.length > 2 && results[2]) {
+      const physioBookings = results[2].map(b => {
+        b.serviceType = 'physiotherapy';
+        if (b.assignedPhysiotherapist) {
+          b.provider = b.assignedPhysiotherapist;
+          b.acceptedProvider = b.assignedPhysiotherapist;
+        } else if (b.confirmedOffer?.physiotherapist) {
+          b.provider = b.confirmedOffer.physiotherapist;
+          b.acceptedProvider = b.confirmedOffer.physiotherapist;
+        }
+        b.title = b.service || 'Physiotherapy Treatment';
+        b.scheduledTime = b.scheduledDate || b.createdAt;
+        return b;
+      });
+      allBookings = [...allBookings, ...physioBookings];
+    }
     
     // Fix: Sort descending (newest first)
     allBookings.sort((a, b) => {
-      const dateA = new Date(a.createdAt || 0);
-      const dateB = new Date(b.createdAt || 0);
+      const dateA = new Date(a.createdAt || a.scheduledTime || 0);
+      const dateB = new Date(b.createdAt || b.scheduledTime || 0);
       return dateB.getTime() - dateA.getTime();
     });
     
@@ -480,13 +565,83 @@ const getActiveBookings = async (userId, role = 'patient') => {
       $in: ['requested', 'accepted', 'on_the_way', 'in_progress']
     };
 
-    const bookings = await Booking.find(filter)
-      .populate('provider patient prescription')
-      .sort({ createdAt: -1 })
-      .lean();
+    const rtFilter = role === 'patient'
+      ? { patient: userId }
+      : { acceptedProvider: userId };
+
+    rtFilter.status = {
+      $in: ['requested', 'accepted', 'packing_medicines', 'out_for_delivery', 'preparing', 'ready', 'on_the_way', 'reached', 'in_progress', 'sample_collected']
+    };
+
+    let RealTimeBooking;
+    try {
+      const rtModule = await import('../models/RealTimeBooking.model.js');
+      RealTimeBooking = rtModule.RealTimeBooking;
+    } catch (e) {}
+
+    let PhysiotherapyBooking;
+    if (role === 'patient') {
+      try {
+        const physioModule = await import('../models/PhysiotherapyBooking.model.js');
+        PhysiotherapyBooking = physioModule.PhysiotherapyBooking;
+      } catch (e) {}
+    }
+
+    const queries = [
+      Booking.find(filter).populate('provider patient prescription').sort({ createdAt: -1 }).lean()
+    ];
+
+    if (RealTimeBooking) {
+      queries.push(RealTimeBooking.find(rtFilter).populate('acceptedProvider patient prescription').sort({ createdAt: -1 }).lean());
+    }
+
+    if (role === 'patient' && PhysiotherapyBooking) {
+      queries.push(PhysiotherapyBooking.find({
+        patient: userId,
+        status: { $in: ['requested', 'offers_received', 'confirmed', 'in_progress'] }
+      }).populate('assignedPhysiotherapist patient offers.physiotherapist').sort({ createdAt: -1 }).lean());
+    }
+
+    const results = await Promise.all(queries);
+    let allBookings = [...results[0]];
+    if (results.length > 1 && results[1]) {
+      const rtBookings = results[1].map(b => {
+        if (b.acceptedProvider) b.provider = b.acceptedProvider;
+        if (!b.serviceType && b.medicines && b.medicines.length > 0) {
+          b.serviceType = 'pharmacist';
+        }
+        return b;
+      });
+      allBookings = [...allBookings, ...rtBookings];
+    }
+    if (results.length > 2 && results[2]) {
+      const physioBookings = results[2].map(b => {
+        b.serviceType = 'physiotherapy';
+        if (b.assignedPhysiotherapist) {
+          b.provider = b.assignedPhysiotherapist;
+          b.acceptedProvider = b.assignedPhysiotherapist;
+        } else if (b.confirmedOffer?.physiotherapist) {
+          b.provider = b.confirmedOffer.physiotherapist;
+          b.acceptedProvider = b.confirmedOffer.physiotherapist;
+        }
+        b.title = b.service || 'Physiotherapy Treatment';
+        b.scheduledTime = b.scheduledDate || b.createdAt;
+        return b;
+      });
+      allBookings = [...allBookings, ...physioBookings];
+    }
+
+    allBookings.sort((a, b) => {
+      const dateA = new Date(a.createdAt || a.scheduledTime || 0);
+      const dateB = new Date(b.createdAt || b.scheduledTime || 0);
+      return dateB.getTime() - dateA.getTime();
+    });
 
     // Add prescription fields for easy frontend access
-    const formattedBookings = bookings.map(booking => {
+    const formattedBookings = allBookings.map(booking => {
+      if (booking.patient) {
+        booking.patient.fullName = `${booking.patient.firstName || ''} ${booking.patient.lastName || ''}`.trim();
+      }
       if (booking.prescription) {
         if (booking.prescription.prescriptionFile) {
           try {
@@ -661,11 +816,38 @@ const acceptBooking = async (bookingId, providerId) => {
 
 const cancelBooking = async (bookingId, userId, reason) => {
   try {
-    const booking = await Booking.findOne({
+    let booking = await Booking.findOne({
       _id: bookingId,
       $or: [{ patient: userId }, { provider: userId }],
       status: { $in: ['requested', 'accepted'] },
     });
+
+    let isRealTime = false;
+    let isPhysio = false;
+
+    if (!booking) {
+      try {
+        const { RealTimeBooking } = await import('../models/RealTimeBooking.model.js');
+        booking = await RealTimeBooking.findOne({
+          _id: bookingId,
+          $or: [{ patient: userId }, { acceptedProvider: userId }],
+          status: { $in: ['requested', 'accepted', 'preparing', 'ready'] },
+        });
+        if (booking) isRealTime = true;
+      } catch (e) {}
+    }
+
+    if (!booking) {
+      try {
+        const { PhysiotherapyBooking } = await import('../models/PhysiotherapyBooking.model.js');
+        booking = await PhysiotherapyBooking.findOne({
+          _id: bookingId,
+          $or: [{ patient: userId }, { assignedPhysiotherapist: userId }],
+          status: { $in: ['requested', 'offers_received', 'confirmed'] },
+        });
+        if (booking) isPhysio = true;
+      } catch (e) {}
+    }
 
     if (!booking) {
       throw new Error('Booking not found or cannot be cancelled');
@@ -675,18 +857,23 @@ const cancelBooking = async (bookingId, userId, reason) => {
     booking.cancellationReason = reason;
     booking.cancelledBy = userId;
     await booking.save();
-    await booking.populate('provider patient');
 
-    
-    const notifyUserId = booking.patient._id.toString() === userId
-      ? booking.provider._id
-      : booking.patient._id;
+    const patientId = booking.patient?._id || booking.patient;
+    const providerId = booking.provider?._id || booking.provider || booking.acceptedProvider || booking.assignedPhysiotherapist;
 
-    await notificationService.sendBookingCancelled(
-      notifyUserId,
-      booking._id.toString(),
-      reason
-    );
+    if (patientId && providerId) {
+      const notifyUserId = patientId.toString() === userId.toString()
+        ? providerId.toString()
+        : patientId.toString();
+
+      try {
+        await notificationService.sendBookingCancelled(
+          notifyUserId,
+          booking._id.toString(),
+          reason
+        );
+      } catch (e) {}
+    }
 
     logger.info(`Booking cancelled: ${bookingId}`);
     return booking;

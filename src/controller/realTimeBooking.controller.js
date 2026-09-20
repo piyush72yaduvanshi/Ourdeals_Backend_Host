@@ -46,8 +46,8 @@ const createBookingRequest = async (req, res) => {
       isEmergency: req.body.isEmergency || false,
       notes: req.body.notes,
       totalAmount: req.body.totalAmount || 0,
-      city: req.body.city || '',
-      state: req.body.state || '',
+      city: req.body.city || req.body.location?.city || req.body.district || req.body.location?.district || '',
+      state: req.body.state || req.body.location?.state || '',
     };
 
     // Validate required fields
@@ -276,11 +276,35 @@ const getBookingDetails = async (req, res) => {
     const userId = req.user.userId;
     const { bookingId } = req.params;
 
-    const booking = await realTimeBookingService.getBookingById(bookingId, userId);
+    let booking;
+    try {
+      booking = await realTimeBookingService.getBookingById(bookingId, userId);
+    } catch (err) {
+      // Fallback: check PhysiotherapyBooking model
+      try {
+        const { PhysiotherapyBooking } = await import("../models/PhysiotherapyBooking.model.js");
+        const physioBooking = await PhysiotherapyBooking.findById(bookingId)
+          .populate("patient", "firstName lastName phone email profilePicture")
+          .populate("assignedPhysiotherapist", "firstName lastName phone email profilePicture")
+          .populate("offers.physiotherapist", "firstName lastName phone email profilePicture")
+          .lean();
+
+        if (physioBooking) {
+          return res.json(successResponse("Booking details fetched", {
+            ...physioBooking,
+            serviceType: "physiotherapy",
+          }));
+        }
+      } catch (_) {}
+      throw err;
+    }
 
     res.json(successResponse("Booking details fetched", booking));
   } catch (error) {
-    res.status(500).json(errorResponse(error.message || "Failed to fetch booking"));
+    const isNotFound = error.status === 404 || (error.message && error.message.toLowerCase().includes("not found"));
+    const isAuth = error.status === 403 || (error.message && error.message.toLowerCase().includes("not authorized"));
+    const statusCode = isNotFound ? 404 : (isAuth ? 403 : 500);
+    res.status(statusCode).json(errorResponse(error.message || "Failed to fetch booking"));
   }
 };
 
