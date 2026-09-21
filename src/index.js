@@ -1,3 +1,6 @@
+import dns from "node:dns";
+dns.setDefaultResultOrder('ipv4first');
+
 import "./config/env.config.js";
 import http from "http";
 import app from "./app.js";
