@@ -82,7 +82,7 @@ const PhysiotherapyBookingSchema = new mongoose.Schema(
     serviceCategory: {
       type: String,
       trim: true,
-      default: "General Physiotherapy",
+      default: "Physiotherapy",
     },
 
     location: {

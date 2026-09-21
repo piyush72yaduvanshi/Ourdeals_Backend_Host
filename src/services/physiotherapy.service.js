@@ -210,7 +210,7 @@ class PhysiotherapyService {
 
     // Fetch physiotherapist details to construct WhatsApp & contact info
     const physio = await User.findById(selectedOffer.physiotherapist)
-      .select("firstName lastName phone email profilePicture")
+      .select("firstName lastName phone email profilePicture specializations experience rating clinicAddress address")
       .lean();
 
     // Construct direct WhatsApp URL
@@ -224,8 +224,19 @@ class PhysiotherapyService {
     return {
       booking,
       contact: {
-        physiotherapistName: `${physio?.firstName} ${physio?.lastName}`,
+        physiotherapistName: `${physio?.firstName || ''} ${physio?.lastName || ''}`.trim(),
+        fullName: `${physio?.firstName || ''} ${physio?.lastName || ''}`.trim(),
+        name: `${physio?.firstName || ''} ${physio?.lastName || ''}`.trim(),
+        firstName: physio?.firstName || '',
+        lastName: physio?.lastName || '',
         phone: physio?.phone,
+        email: physio?.email,
+        profilePicture: physio?.profilePicture,
+        specialization: physio?.specializations
+          ? (Array.isArray(physio.specializations) ? physio.specializations.join(', ') : physio.specializations.toString())
+          : '',
+        experience: physio?.experience?.toString() || '',
+        clinicAddress: physio?.clinicAddress || physio?.address || '',
         whatsappLink,
         message: "You can now directly call or chat on WhatsApp with your physiotherapist.",
       },

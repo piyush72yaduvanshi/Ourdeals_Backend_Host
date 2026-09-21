@@ -159,7 +159,7 @@ export const createBookingRequest = async (req, res) => {
       patientAge: patientAge ? Number(patientAge) : undefined,
       patientGender,
       service,
-      serviceCategory: serviceCategory || "General Physiotherapy",
+      serviceCategory: serviceCategory || service || "Physiotherapy",
       location: {
         address: location.address,
         coordinates,
@@ -177,10 +177,19 @@ export const createBookingRequest = async (req, res) => {
     res.status(201).json(
       successResponse("Physiotherapy request created and broadcasted to nearby physiotherapists", {
         bookingId: booking._id,
+        _id: booking._id,
         status: booking.status,
         service: booking.service,
+        serviceCategory: booking.serviceCategory,
+        patientName: booking.patientName,
+        patientPhone: booking.patientPhone,
+        patientAge: booking.patientAge,
+        patientGender: booking.patientGender,
+        location: booking.location,
         scheduledDate: booking.scheduledDate,
         scheduledTimeSlot: booking.scheduledTimeSlot,
+        notes: booking.notes,
+        createdAt: booking.createdAt,
         notifiedProvidersCount: booking.notifiedPhysiotherapists?.length || 0,
         paymentPolicy: "No in-app payment required. Pay on visit.",
       })
@@ -252,6 +261,8 @@ export const getNearbyRequests = async (req, res) => {
       const isOfferActive = myOffer && myOffer.status !== "rejected";
       return {
         ...reqItem,
+        serviceType: "physiotherapy",
+        title: reqItem.service || "Physiotherapy",
         alreadyOffered: isOfferActive,
         hasOffered: isOfferActive,
         myOffer: isOfferActive ? myOffer : null,
@@ -338,7 +349,18 @@ export const getBookingOffers = async (req, res) => {
     res.json(
       successResponse("Booking offers fetched", {
         bookingId: booking._id,
+        _id: booking._id,
         service: booking.service,
+        serviceCategory: booking.serviceCategory,
+        patientName: booking.patientName,
+        patientPhone: booking.patientPhone,
+        patientAge: booking.patientAge,
+        patientGender: booking.patientGender,
+        location: booking.location,
+        scheduledDate: booking.scheduledDate,
+        scheduledTimeSlot: booking.scheduledTimeSlot,
+        notes: booking.notes,
+        createdAt: booking.createdAt,
         status: booking.status,
         offers: booking.offers,
         confirmedOffer: booking.confirmedOffer,
@@ -367,9 +389,31 @@ export const confirmOffer = async (req, res) => {
     res.json(
       successResponse("Offer confirmed successfully! Contact details unlocked.", {
         bookingId: result.booking._id,
+        _id: result.booking._id,
         status: result.booking.status,
+        serviceType: "physiotherapy",
+        service: result.booking.service,
+        title: result.booking.service || "Physiotherapy",
+        serviceCategory: result.booking.serviceCategory,
+        patientName: result.booking.patientName,
+        patientPhone: result.booking.patientPhone,
+        patientAge: result.booking.patientAge,
+        patientGender: result.booking.patientGender,
+        location: result.booking.location,
+        address: result.booking.location?.address || "",
+        scheduledDate: result.booking.scheduledDate,
+        scheduledTimeSlot: result.booking.scheduledTimeSlot,
+        scheduledTime: result.booking.scheduledDate || result.booking.createdAt,
+        notes: result.booking.notes,
+        createdAt: result.booking.createdAt,
         confirmedOffer: result.booking.confirmedOffer,
+        offerAmount: result.booking.confirmedOffer?.offerAmount,
+        totalAmount: result.booking.confirmedOffer?.offerAmount,
+        fees: result.booking.confirmedOffer?.offerAmount,
         contact: result.contact,
+        contactInfo: result.contact,
+        acceptedProvider: result.contact,
+        provider: result.contact,
       })
     );
   } catch (error) {
@@ -496,6 +540,8 @@ export const getPhysiotherapistBookings = async (req, res) => {
       const isOfferActive = myOffer && myOffer.status !== "rejected";
       return {
         ...b,
+        serviceType: "physiotherapy",
+        title: b.service || "Physiotherapy",
         patientContact,
         alreadyOffered: isOfferActive,
         hasOffered: isOfferActive,
@@ -518,8 +564,8 @@ export const getBookingById = async (req, res) => {
     const { bookingId } = req.params;
     const booking = await PhysiotherapyBooking.findById(bookingId)
       .populate("patient", "firstName lastName phone profilePicture age gender")
-      .populate("assignedPhysiotherapist", "firstName lastName phone email profilePicture specializations experience rating")
-      .populate("offers.physiotherapist", "firstName lastName phone email profilePicture specializations experience rating")
+      .populate("assignedPhysiotherapist", "firstName lastName phone email profilePicture specializations experience rating clinicAddress address")
+      .populate("offers.physiotherapist", "firstName lastName phone email profilePicture specializations experience rating clinicAddress address")
       .lean();
 
     if (!booking) {
@@ -545,18 +591,41 @@ export const getBookingById = async (req, res) => {
       if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
       contactInfo = {
         name: `${booking.assignedPhysiotherapist.firstName} ${booking.assignedPhysiotherapist.lastName}`,
+        fullName: `${booking.assignedPhysiotherapist.firstName} ${booking.assignedPhysiotherapist.lastName}`,
+        physiotherapistName: `${booking.assignedPhysiotherapist.firstName} ${booking.assignedPhysiotherapist.lastName}`,
         phone: booking.assignedPhysiotherapist.phone,
+        email: booking.assignedPhysiotherapist.email,
+        profilePicture: booking.assignedPhysiotherapist.profilePicture,
+        specialization: booking.assignedPhysiotherapist.specializations
+          ? (Array.isArray(booking.assignedPhysiotherapist.specializations)
+              ? booking.assignedPhysiotherapist.specializations.join(", ")
+              : booking.assignedPhysiotherapist.specializations.toString())
+          : "",
+        experience: booking.assignedPhysiotherapist.experience?.toString() || "",
+        clinicAddress: booking.assignedPhysiotherapist.clinicAddress || booking.assignedPhysiotherapist.address || "",
         whatsappLink: `https://wa.me/${cleanPhone}`,
       };
     }
 
+    const provider = booking.assignedPhysiotherapist || booking.confirmedOffer?.physiotherapist;
+
     res.json(
       successResponse("Booking details fetched", {
         ...booking,
+        serviceType: "physiotherapy",
+        title: booking.service || "Physiotherapy",
+        service: booking.service,
+        serviceCategory: booking.serviceCategory,
+        scheduledTime: booking.scheduledDate || booking.createdAt,
+        provider: provider,
+        acceptedProvider: provider,
+        address: booking.location?.address || "",
         offerAmount,
+        totalAmount: offerAmount,
         finalAmount: offerAmount,
         fees: offerAmount,
         contactInfo,
+        contact: contactInfo,
       })
     );
   } catch (error) {

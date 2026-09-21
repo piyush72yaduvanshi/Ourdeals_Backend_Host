@@ -284,15 +284,56 @@ const getBookingDetails = async (req, res) => {
       try {
         const { PhysiotherapyBooking } = await import("../models/PhysiotherapyBooking.model.js");
         const physioBooking = await PhysiotherapyBooking.findById(bookingId)
-          .populate("patient", "firstName lastName phone email profilePicture")
-          .populate("assignedPhysiotherapist", "firstName lastName phone email profilePicture")
-          .populate("offers.physiotherapist", "firstName lastName phone email profilePicture")
+          .populate("patient", "firstName lastName phone email profilePicture age gender")
+          .populate("assignedPhysiotherapist", "firstName lastName phone email profilePicture specializations experience licenseNumber city state pincode clinicAddress address")
+          .populate("offers.physiotherapist", "firstName lastName phone email profilePicture specializations experience sessionFee rating clinicAddress address")
           .lean();
 
         if (physioBooking) {
+          const provider = physioBooking.assignedPhysiotherapist || physioBooking.confirmedOffer?.physiotherapist;
+          const offerAmount =
+            physioBooking.confirmedOffer?.offerAmount ||
+            physioBooking.offers?.find((o) => o.status === "accepted")?.offerAmount ||
+            physioBooking.offers?.[0]?.offerAmount ||
+            null;
+          let contactInfo = null;
+          if (physioBooking.assignedPhysiotherapist) {
+            let cleanPhone = (physioBooking.assignedPhysiotherapist.phone || "").replace(/[^0-9]/g, "");
+            if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+            contactInfo = {
+              name: `${physioBooking.assignedPhysiotherapist.firstName} ${physioBooking.assignedPhysiotherapist.lastName}`,
+              fullName: `${physioBooking.assignedPhysiotherapist.firstName} ${physioBooking.assignedPhysiotherapist.lastName}`,
+              physiotherapistName: `${physioBooking.assignedPhysiotherapist.firstName} ${physioBooking.assignedPhysiotherapist.lastName}`,
+              phone: physioBooking.assignedPhysiotherapist.phone,
+              email: physioBooking.assignedPhysiotherapist.email,
+              profilePicture: physioBooking.assignedPhysiotherapist.profilePicture,
+              specialization: physioBooking.assignedPhysiotherapist.specializations
+                ? (Array.isArray(physioBooking.assignedPhysiotherapist.specializations)
+                    ? physioBooking.assignedPhysiotherapist.specializations.join(", ")
+                    : physioBooking.assignedPhysiotherapist.specializations.toString())
+                : "",
+              experience: physioBooking.assignedPhysiotherapist.experience?.toString() || "",
+              clinicAddress: physioBooking.assignedPhysiotherapist.clinicAddress || physioBooking.assignedPhysiotherapist.address || "",
+              whatsappLink: `https://wa.me/${cleanPhone}`,
+            };
+          }
+
           return res.json(successResponse("Booking details fetched", {
             ...physioBooking,
             serviceType: "physiotherapy",
+            service: physioBooking.service || "Physiotherapy",
+            title: physioBooking.service || "Physiotherapy",
+            serviceCategory: physioBooking.serviceCategory,
+            provider: provider,
+            acceptedProvider: provider,
+            address: physioBooking.location?.address || "",
+            offerAmount,
+            totalAmount: offerAmount,
+            finalAmount: offerAmount,
+            fees: offerAmount,
+            contactInfo,
+            contact: contactInfo,
+            scheduledTime: physioBooking.scheduledDate || physioBooking.createdAt,
           }));
         }
       } catch (_) {}

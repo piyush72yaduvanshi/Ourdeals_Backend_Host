@@ -290,8 +290,19 @@ const getBooking = async (bookingId) => {
           logger.info('✅ Found in PhysiotherapyBooking collection');
           booking = physioBooking;
           booking.serviceType = 'physiotherapy';
-          booking.title = booking.service || 'Physiotherapy Treatment';
+          booking.service = physioBooking.service;
+          booking.title = booking.service || 'Physiotherapy';
+          booking.serviceCategory = physioBooking.serviceCategory;
+          booking.address = physioBooking.location?.address || '';
           booking.scheduledTime = booking.scheduledDate || booking.createdAt;
+          const offerAmount =
+            booking.confirmedOffer?.offerAmount ||
+            booking.offers?.find((o) => o.status === "accepted")?.offerAmount ||
+            booking.offers?.[0]?.offerAmount ||
+            null;
+          booking.offerAmount = offerAmount;
+          booking.totalAmount = offerAmount;
+          booking.fees = offerAmount;
           if (booking.assignedPhysiotherapist) {
             booking.provider = booking.assignedPhysiotherapist;
             booking.acceptedProvider = booking.assignedPhysiotherapist;
