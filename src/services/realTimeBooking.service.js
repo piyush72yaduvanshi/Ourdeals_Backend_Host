@@ -646,8 +646,16 @@ const getProviderBookings = async (providerId, filters = {}) => {
     ]);
 
     bookings.forEach(b => {
-      if (b.offers && b.offers.some(o => o.vendorId && o.vendorId.toString() === providerId.toString())) {
+      const myOffer = b.offers ? b.offers.find(o => o.vendorId && o.vendorId.toString() === providerId.toString()) : null;
+      if (myOffer && myOffer.status !== 'rejected') {
         b.hasOffered = true;
+        b.myOffer = myOffer;
+      } else {
+        b.hasOffered = false;
+        b.myOffer = myOffer || null;
+      }
+      if (myOffer && myOffer.status === 'rejected') {
+        b.offerRejected = true;
       }
     });
 

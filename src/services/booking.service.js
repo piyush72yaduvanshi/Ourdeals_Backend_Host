@@ -497,7 +497,7 @@ const getUserBookings = async (userId, role, query = {}) => {
           b.acceptedProvider = b.confirmedOffer.physiotherapist;
         }
         b.title = b.service || 'Physiotherapy Treatment';
-        b.scheduledTime = b.scheduledDate || b.createdAt;
+        b.scheduledTime = b.createdAt || b.scheduledDate;
         return b;
       });
       allBookings = [...allBookings, ...physioBookings];

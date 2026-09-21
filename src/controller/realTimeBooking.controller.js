@@ -634,25 +634,34 @@ const submitOfferForBooking = async (req, res) => {
     }
 
     // Check if offer already submitted by this vendor
-    const existingOffer = booking.offers?.find(o => o.vendorId.toString() === vendorId.toString());
-    if (existingOffer) {
-      return res.status(400).json(errorResponse('You have already submitted an offer for this request'));
+    const existingOfferIndex = booking.offers?.findIndex(o => o.vendorId.toString() === vendorId.toString());
+    if (existingOfferIndex >= 0) {
+      const existingOffer = booking.offers[existingOfferIndex];
+      if (existingOffer.status !== 'rejected') {
+        return res.status(400).json(errorResponse('You have already submitted an offer for this request'));
+      }
+      // Re-activate offer with new amount, deliveryTime, and note
+      booking.offers[existingOfferIndex].amount = Number(amount);
+      booking.offers[existingOfferIndex].deliveryTime = deliveryTime || 'Standard';
+      booking.offers[existingOfferIndex].note = note || '';
+      booking.offers[existingOfferIndex].status = 'pending';
+      booking.offers[existingOfferIndex].createdAt = new Date();
+    } else {
+      const newOffer = {
+        vendorId,
+        amount: Number(amount),
+        deliveryTime: deliveryTime || 'Standard',
+        note: note || '',
+        status: 'pending',
+        createdAt: new Date()
+      };
+
+      if (!booking.offers) {
+        booking.offers = [];
+      }
+
+      booking.offers.push(newOffer);
     }
-
-    const newOffer = {
-      vendorId,
-      amount: Number(amount),
-      deliveryTime: deliveryTime || 'Standard',
-      note: note || '',
-      status: 'pending',
-      createdAt: new Date()
-    };
-
-    if (!booking.offers) {
-      booking.offers = [];
-    }
-
-    booking.offers.push(newOffer);
     await booking.save();
 
     // Notify patient

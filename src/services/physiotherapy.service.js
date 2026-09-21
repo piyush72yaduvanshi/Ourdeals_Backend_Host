@@ -138,6 +138,7 @@ class PhysiotherapyService {
       booking.offers[existingOfferIndex].offerAmount = offerAmount;
       booking.offers[existingOfferIndex].estimatedArrival = estimatedArrival || booking.offers[existingOfferIndex].estimatedArrival;
       booking.offers[existingOfferIndex].notes = notes || booking.offers[existingOfferIndex].notes;
+      booking.offers[existingOfferIndex].status = "pending";
       booking.offers[existingOfferIndex].createdAt = new Date();
     } else {
       booking.offers.push({
@@ -229,6 +230,35 @@ class PhysiotherapyService {
         message: "You can now directly call or chat on WhatsApp with your physiotherapist.",
       },
     };
+  }
+
+  /**
+   * Patient rejects one offer
+   */
+  async rejectOffer(bookingId, patientId, offerId) {
+    const booking = await PhysiotherapyBooking.findOne({
+      _id: bookingId,
+      patient: patientId,
+    });
+
+    if (!booking) {
+      throw new Error("Booking request not found or unauthorized");
+    }
+
+    const targetOffer = booking.offers.id(offerId);
+    if (!targetOffer) {
+      throw new Error("Offer not found");
+    }
+
+    targetOffer.status = "rejected";
+
+    const hasActiveOffers = booking.offers.some((o) => o.status === "pending");
+    if (!hasActiveOffers && booking.status === "offers_received") {
+      booking.status = "requested";
+    }
+
+    await booking.save();
+    return booking;
   }
 
   /**

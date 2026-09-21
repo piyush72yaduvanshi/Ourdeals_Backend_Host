@@ -8,6 +8,7 @@ import {
   rejectRequest,
   getBookingOffers,
   confirmOffer,
+  rejectOffer,
   updateBookingStatus,
   getPatientBookings,
   getPhysiotherapistBookings,
@@ -55,6 +56,13 @@ router.post(
   authenticate,
   authorize("patient"),
   confirmOffer
+);
+
+router.post(
+  "/requests/:bookingId/reject-offer",
+  authenticate,
+  authorize("patient"),
+  rejectOffer
 );
 
 // 3. Physiotherapist routes

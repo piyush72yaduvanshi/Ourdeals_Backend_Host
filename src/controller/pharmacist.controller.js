@@ -495,25 +495,32 @@ const submitOffer = async (req, res) => {
     }
 
     // Check if offer already submitted by this vendor
-    const existingOffer = booking.offers?.find(o => o.vendorId.toString() === pharmacistId.toString());
-    if (existingOffer) {
-      return res.status(400).json(errorResponse('You have already submitted an offer for this order'));
-    }
+    const existingOfferIndex = booking.offers?.findIndex(o => o.vendorId.toString() === pharmacistId.toString());
+    if (existingOfferIndex >= 0) {
+      const existingOffer = booking.offers[existingOfferIndex];
+      if (existingOffer.status !== 'rejected') {
+        return res.status(400).json(errorResponse('You have already submitted an offer for this order'));
+      }
+      booking.offers[existingOfferIndex].amount = Number(amount);
+      booking.offers[existingOfferIndex].deliveryTime = deliveryTime;
+      booking.offers[existingOfferIndex].status = 'pending';
+      booking.offers[existingOfferIndex].createdAt = new Date();
+    } else {
+      // Add new offer
+      const newOffer = {
+        vendorId: pharmacistId,
+        amount: Number(amount),
+        deliveryTime,
+        status: 'pending',
+        createdAt: new Date()
+      };
 
-    // Add new offer
-    const newOffer = {
-      vendorId: pharmacistId,
-      amount: Number(amount),
-      deliveryTime,
-      status: 'pending',
-      createdAt: new Date()
-    };
-
-    if (!booking.offers) {
-      booking.offers = [];
+      if (!booking.offers) {
+        booking.offers = [];
+      }
+      
+      booking.offers.push(newOffer);
     }
-    
-    booking.offers.push(newOffer);
     await booking.save();
 
     // Notify patient

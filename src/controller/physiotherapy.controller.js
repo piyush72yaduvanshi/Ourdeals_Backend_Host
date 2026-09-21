@@ -249,10 +249,13 @@ export const getNearbyRequests = async (req, res) => {
       const myOffer = reqItem.offers.find(
         (o) => o.physiotherapist.toString() === physioId.toString()
       );
+      const isOfferActive = myOffer && myOffer.status !== "rejected";
       return {
         ...reqItem,
-        alreadyOffered: !!myOffer,
-        myOffer: myOffer || null,
+        alreadyOffered: isOfferActive,
+        hasOffered: isOfferActive,
+        myOffer: isOfferActive ? myOffer : null,
+        myOfferStatus: myOffer ? myOffer.status : null,
         totalOffersCount: reqItem.offers.length,
       };
     });
@@ -375,6 +378,26 @@ export const confirmOffer = async (req, res) => {
 };
 
 /**
+ * 8b. Patient rejects an offer
+ */
+export const rejectOffer = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { offerId } = req.body;
+    const patientId = req.user.userId;
+
+    if (!offerId) {
+      return res.status(400).json(errorResponse("offerId is required"));
+    }
+
+    const booking = await physiotherapyService.rejectOffer(bookingId, patientId, offerId);
+    res.json(successResponse("Offer rejected successfully", booking));
+  } catch (error) {
+    res.status(400).json(errorResponse(error.message));
+  }
+};
+
+/**
  * 9. Update booking status (in_progress, completed, cancelled)
  */
 export const updateBookingStatus = async (req, res) => {
@@ -470,11 +493,14 @@ export const getPhysiotherapistBookings = async (req, res) => {
       const myOffer = b.offers?.find(
         (o) => (o.physiotherapist?._id || o.physiotherapist)?.toString() === physioId.toString()
       );
+      const isOfferActive = myOffer && myOffer.status !== "rejected";
       return {
         ...b,
         patientContact,
-        alreadyOffered: !!myOffer,
-        myOffer: myOffer || null,
+        alreadyOffered: isOfferActive,
+        hasOffered: isOfferActive,
+        myOffer: isOfferActive ? myOffer : null,
+        myOfferStatus: myOffer ? myOffer.status : null,
       };
     });
 
